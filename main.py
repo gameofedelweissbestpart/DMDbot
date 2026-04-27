@@ -440,7 +440,7 @@ async def daily_report_task():
                 
                 em.add_field(name="✅ สมาชิกที่แจ้งลา", value=msg_left, inline=False)
                 em.add_field(name="❌ สมาชิกที่ไม่ได้แจ้งลา", value=msg_ready, inline=False)
-                em.set_footer(text=f"บันทึกเมื่อ: {n.strftime('%d/%m/%Y %H:%M น.')}")
+                em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M น.')}")
                 await w_ch.send(embed=em)
 
 # --- 6. ระบบยกเลิกใบลา (ปรับหัวข้อ Log และลบบรรทัดสถานะออก) ---
@@ -517,104 +517,35 @@ class CancelSelect(discord.ui.Select):
             txt = f"⚠️ **แน่ใจหรือไม่ที่จะยกเลิกการลานี้?**\n👤 **คนลา:** <@{od['target_id']}>\n📝 **ประเภท:** `{od.get('leave_category','ทั่วไป')}`\n📅 **วันที่:** {dr} `({od.get('total_days', 1)} วัน)`"
             await it.edit_original_response(content=txt, view=ConfirmCancelView(idx, od))
 
-# --- 7. ระบบแก้ไขวันสิ้นสุด (แก้บั๊ก Interaction / เพิ่ม Retry / จำกัด 15 วัน) ---
+# --- 7. ระบบแก้ไขวันสิ้นสุด (ซ่อมจุดบอด: โต้ตอบล้มเหลว) ---
 async def process_edit_leave(it, idx, od, new_end_str):
     d = load_json(DB_LEAVE, [])
     old_e = od['end_date']
     if 0 <= idx < len(d):
-        old_days = (datetime.strptime(old_e, "%d/%m/%Y") - datetime.strptime(od['start_date'], "%d/%m/%Y")).days + 1
-        new_days = (datetime.strptime(new_end_str, "%d/%m/%Y") - datetime.strptime(od['start_date'], "%d/%m/%Y")).days + 1
-        diff = new_days - old_days
-        diff_txt = f"เพิ่มขึ้น {diff} วัน" if diff > 0 else f"ลดลง {abs(diff)} วัน" if diff < 0 else "จำนวนวันเท่าเดิม"
-
         d[idx]['end_date'] = new_end_str
-        d[idx]['total_days'] = new_days
+        d[idx]['total_days'] = (datetime.strptime(new_end_str, "%d/%m/%Y") - datetime.strptime(od['start_date'], "%d/%m/%Y")).days + 1
         save_json(DB_LEAVE, d)
         await update_summary_board()
-        
         cfg = load_json(CONFIG_PATH, {})
         log_ch_id = cfg.get("log_ch")
         if log_ch_id:
             log_ch = bot.get_channel(int(log_ch_id))
             if log_ch:
-                log_em = discord.Embed(title="📌 บันทึกการแก้ไขวันสิ้นสุดการลา", color=0x95a5a6)
-                on_behalf = f"\n**👮 ผู้แจ้งแก้ไขแทน:** <@{it.user.id}>" if od['target_id'] != str(it.user.id) else ""
-                
-                log_em.description = (
-                    f"**👤 สมาชิกที่ลา:** <@{od['target_id']}>{on_behalf}\n\n"
-                    f"**📝 ประเภท:** {od.get('leave_category', 'ทั่วไป')}\n"
-                    f"**📅 วันที่ลาเดิม:** {od['start_date']} - {old_e} `(รวม {old_days} วัน)`\n"
-                    f"**🔹 วันที่ลาใหม่:** {od['start_date']} - {new_end_str} `(รวม {new_days} วัน)`\n"
-                    f"**📈 การเปลี่ยนแปลง:** `{diff_txt}`\n"
-                    f"**💬 เหตุผลเดิมที่แจ้ง:** {od.get('reason', '-')}\n\n"
-                    f"{LONG_SEP}"
-                )
+                log_em = discord.Embed(title="📌 บันทึกการแก้ไขวันสิ้นสุดการลา", color=0xffffff)
+                log_em.add_field(name="👤 สมาชิกที่ลา", value=f"<@{od['target_id']}>", inline=True)
+                if od['target_id'] != str(it.user.id):
+                    log_em.add_field(name="👮 ผู้แก้ไข", value=it.user.mention, inline=True)
+                log_em.add_field(name="📝 ประเภท", value=od.get('leave_category', 'ทั่วไป'), inline=False)
+                log_em.add_field(name="📅 วันที่สิ้นสุดใหม่", value=f"{new_end_str}", inline=True)
+                log_em.add_field(name="📝 สถานะ", value=f"เปลี่ยนจาก {old_e} เป็น {new_end_str}", inline=False)
                 log_em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M')} น.")
                 await log_ch.send(embed=log_em)
         
-        await it.edit_original_response(content=f"✏️ แก้ไขข้อมูลการลาเรียบร้อยแล้ว!", embed=None, view=None)
+        # ลบข้อความยืนยันหลังสำเร็จ
+        await it.edit_original_response(content=f"✅ แก้ไขวันสิ้นสุดเป็น **{new_end_str}** เรียบร้อยแล้ว!", embed=None, view=None)
         await asyncio.sleep(3)
-        try:
-            await it.delete_original_response()
-        except:
-            pass
-
-class EditRetryView(discord.ui.View):
-    def __init__(self, idx, od, p_it):
-        super().__init__(timeout=120)
-        self.idx, self.od, self.p_it = idx, od, p_it
-    @discord.ui.button(label="📝 แก้ไขวันที่อีกครั้ง", style=discord.ButtonStyle.primary)
-    async def retry(self, it, b):
-        # เรียก Modal ทันทีเพื่อความสดใหม่ของ Interaction
-        await it.response.send_modal(EditDateModal(self.idx, self.od))
-        try:
-            await it.delete_original_response()
-        except:
-            pass
-
-class EditDateModal(discord.ui.Modal):
-    def __init__(self, idx, od, parent_it=None):
-        super().__init__(title="ระบุวันที่กลับมาจริง")
-        self.idx, self.od, self.parent_it = idx, od, parent_it
-        self.new_e = discord.ui.TextInput(label='วันที่กลับมาจริง (วว/ดด/ปปปป) *ใช้ ค.ศ. เท่านั้น', placeholder='ตัวอย่าง: 28/04/2026', required=True)
-        self.add_item(self.new_e)
-    async def on_submit(self, it: discord.Interaction):
-        val = self.new_e.value.strip()
-        
-        # ตรวจสอบ ค.ศ.
-        if not validate_date(val):
-            return await it.response.send_message("❌ รูปแบบวันที่ไม่ถูกต้อง หรือไม่ใช่ปี ค.ศ.!", view=EditRetryView(self.idx, self.od, None), ephemeral=True)
-        
-        s_dt = datetime.strptime(self.od['start_date'], "%d/%m/%Y")
-        e_dt = datetime.strptime(val, "%d/%m/%Y")
-        
-        if e_dt < s_dt:
-            return await it.response.send_message("❌ วันที่กลับมาจริงต้องไม่มาก่อนวันที่เริ่มลา!", view=EditRetryView(self.idx, self.od, None), ephemeral=True)
-
-        # กฎข้อที่ 2: แก้ไขแล้วต้องไม่เกิน 15 วัน
-        new_days = (e_dt - s_dt).days + 1
-        if new_days > 15:
-            return await it.response.send_message(content=f"❌ **ไม่สามารถลาเกิน 15 วันได้ (ยอดใหม่คือ {new_days} วัน)**\nโปรดติดต่อแอดมินเพื่อแก้ไขรายการนี้", view=EditRetryView(self.idx, self.od, None), ephemeral=True)
-
-        # แก้ไขจุดโต้ตอบล้มเหลว: ใช้การลบผ่านข้อความปัจจุบันแทน interaction เก่า
-        try:
-            await it.message.delete()
-        except:
-            pass
-            
-        old_days = (datetime.strptime(self.od['end_date'], "%d/%m/%Y") - s_dt).days + 1
-        diff = new_days - old_days
-        diff_txt = f"เพิ่มขึ้น {diff} วัน" if diff > 0 else f"ลดลง {abs(diff)} วัน" if diff < 0 else "จำนวนวันเท่าเดิม"
-
-        em = discord.Embed(title="確認 | ตรวจสอบความถูกต้อง", color=0xffffff) # สีขาวตามสั่ง
-        em.description = (
-            f"**👤 สมาชิก:** <@{self.od['target_id']}>\n"
-            f"**📅 วันที่ลาเดิม:** {self.od['start_date']} - {self.od['end_date']} `({old_days} วัน)`\n"
-            f"**🔹 วันที่ลาใหม่:** {self.od['start_date']} - {val} `({new_days} วัน)`\n"
-            f"**📊 การเปลี่ยนแปลง:** `{diff_txt}`\n\n"
-            f"**ยืนยันการแก้ไขข้อมูลหรือไม่?**"
-        )
-        await it.response.send_message(embed=em, view=ConfirmEditView(self.idx, self.od, val), ephemeral=True)
+        try: await it.delete_original_response()
+        except: pass
 
 class ConfirmEditView(discord.ui.View):
     def __init__(self, idx, od, new_end):
@@ -624,20 +555,39 @@ class ConfirmEditView(discord.ui.View):
     async def confirm(self, it, b):
         await it.response.defer(ephemeral=True)
         await process_edit_leave(it, self.idx, self.od, self.new_end)
-    @discord.ui.button(label="📅 เลือกวันใหม่", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="📅 เลือกวันสิ้นสุดใหม่", style=discord.ButtonStyle.primary)
     async def reselect(self, it, b):
-        await it.response.edit_message(content="📅 **กรุณาเลือกวันที่สิ้นสุดใหม่อีกครั้ง:**", embed=None, view=SubMenuView(it, EditDateSelect(self.idx, self.od, it)))
+        await it.response.edit_message(content="📅 **กรุณาเลือกวันที่สิ้นสุดใหม่อีกครั้ง:**", embed=None, view=SubMenuView(it, EditDateSelect(self.idx, self.od)))
     @discord.ui.button(label="❌ ยกเลิก", style=discord.ButtonStyle.danger)
     async def cancel(self, it, b):
         await it.response.defer()
-        try:
-            await it.delete_original_response()
-        except:
-            pass
+        try: await it.delete_original_response()
+        except: pass
+
+class EditDateModal(discord.ui.Modal):
+    def __init__(self, idx, od):
+        super().__init__(title="ระบุวันที่กลับมาจริง")
+        self.idx, self.od = idx, od
+        self.new_e = discord.ui.TextInput(label='วันที่กลับมาจริง (วว/ดด/ปปปป)', placeholder='ตัวอย่าง: 28/04/2026', required=True)
+        self.add_item(self.new_e)
+    async def on_submit(self, it: discord.Interaction):
+        val = self.new_e.value.strip()
+        if not validate_date(val): return await it.response.send_message("❌ รูปแบบวันที่ผิด (ค.ศ. เท่านั้น)!", ephemeral=True)
+        today = get_thai_time().date()
+        s_dt = datetime.strptime(self.od['start_date'], "%d/%m/%Y").date()
+        new_e_dt = datetime.strptime(val, "%d/%m/%Y").date()
+        if new_e_dt < today or new_e_dt < s_dt: return await it.response.send_message("❌ วันที่ผิดพลาด!", ephemeral=True)
+        
+        em = discord.Embed(title="⚠️ ยืนยันการแก้ไขวันสิ้นสุดการลา", color=0xf1c40f)
+        em.add_field(name="👤 สมาชิกที่ลา", value=f"<@{self.od['target_id']}>", inline=True)
+        em.add_field(name="📝 ประเภท", value=self.od.get('leave_category', 'ทั่วไป'), inline=True)
+        em.add_field(name="📅 ช่วงเวลาเดิม", value=f"{self.od['start_date']} - {self.od['end_date']}", inline=False)
+        em.add_field(name="🔹 เปลี่ยนวันสิ้นสุดเป็น", value=f"**{val}**", inline=False)
+        await it.response.send_message(embed=em, view=ConfirmEditView(self.idx, self.od, val), ephemeral=True)
 
 class EditDateSelect(discord.ui.Select):
-    def __init__(self, idx, od, parent_it=None):
-        self.idx, self.od, self.parent_it = idx, od, parent_it
+    def __init__(self, idx, od):
+        self.idx, self.od = idx, od
         s_dt = datetime.strptime(od['start_date'], "%d/%m/%Y")
         e_dt = datetime.strptime(od['end_date'], "%d/%m/%Y")
         opts = []
@@ -649,38 +599,29 @@ class EditDateSelect(discord.ui.Select):
         super().__init__(placeholder="📅 เลือกวันที่กลับมาจริง...", options=opts)
     
     async def callback(self, it: discord.Interaction):
-        # กฎข้อที่ 8: แก้ไข Interaction Failed โดยการใช้ it.response.send_modal ทันที
         if self.values[0] == "manual": 
-            await it.response.send_modal(EditDateModal(self.idx, self.od, None))
+            # ✅ แก้ไขจุดตาย: เรียก Modal ทันที และห้าม Response ซ้อนกันในฟังก์ชันนี้
+            await it.response.send_modal(EditDateModal(self.idx, self.od))
         else:
             val = self.values[0]
-            # ตรวจสอบ 15 วันในกรณีเลือกจากเมนู (แม้ปกติจะไม่เกินอยู่แล้ว)
-            s_dt = datetime.strptime(self.od['start_date'], "%d/%m/%Y")
-            new_days = (datetime.strptime(val, "%d/%m/%Y") - s_dt).days + 1
-            old_days = (datetime.strptime(self.od['end_date'], "%d/%m/%Y") - s_dt).days + 1
-            diff = new_days - old_days
-            diff_txt = f"เพิ่มขึ้น {diff} วัน" if diff > 0 else f"ลดลง {abs(diff)} วัน" if diff < 0 else "จำนวนวันเท่าเดิม"
-
-            em = discord.Embed(title="確認 | ตรวจสอบความถูกต้อง", color=0xffffff)
-            em.description = (
-                f"**👤 สมาชิก:** <@{self.od['target_id']}>\n"
-                f"**📅 วันที่ลาเดิม:** {self.od['start_date']} - {self.od['end_date']} `({old_days} วัน)`\n"
-                f"**🔹 วันที่ลาใหม่:** {self.od['start_date']} - {val} `({new_days} วัน)`\n"
-                f"**📊 การเปลี่ยนแปลง:** `{diff_txt}`\n\n"
-                f"**ยืนยันการแก้ไขข้อมูลหรือไม่?**"
-            )
+            if datetime.strptime(val, "%d/%m/%Y").date() < get_thai_time().date(): 
+                return await it.response.send_message("❌ ไม่สามารถลาย้อนหลังได้", ephemeral=True)
+            em = discord.Embed(title="⚠️ ยืนยันการแก้ไขวันสิ้นสุดการลา", color=0xf1c40f)
+            em.add_field(name="👤 สมาชิกที่ลา", value=f"<@{self.od['target_id']}>", inline=True)
+            em.add_field(name="📝 ประเภท", value=self.od.get('leave_category', 'ทั่วไป'), inline=True)
+            em.add_field(name="📅 ช่วงเวลาเดิม", value=f"{self.od['start_date']} - {self.od['end_date']}", inline=False)
+            em.add_field(name="🔹 เปลี่ยนวันสิ้นสุดเป็น", value=f"**{val}**", inline=False)
             await it.response.edit_message(content=None, embed=em, view=ConfirmEditView(self.idx, self.od, val))
 
 class EditLeaveSelect(discord.ui.Select):
-    def __init__(self, opts, parent_it=None):
+    def __init__(self, opts):
         super().__init__(placeholder="✏️ เลือกใบลาที่ต้องการแก้...", options=opts)
-        self.parent_it = parent_it
     async def callback(self, it):
         await it.response.defer(ephemeral=True)
         idx = int(self.values[0])
         d = load_json(DB_LEAVE, [])
         if 0 <= idx < len(d):
-            await it.edit_original_response(content="📅 **เลือกวันที่สิ้นสุดใหม่:**", view=SubMenuView(it, EditDateSelect(idx, d[idx], it)))
+            await it.edit_original_response(content="📅 **เลือกวันที่สิ้นสุดใหม่:**", view=SubMenuView(it, EditDateSelect(idx, d[idx])))
 
 # --- 8. เมนูหลัก 4 ปุ่ม (คงเดิมทุกลิงก์ custom_id + เพิ่มสิทธิ์แอดมิน) ---
 class LeaveMainView(discord.ui.View):
@@ -697,7 +638,6 @@ class LeaveMainView(discord.ui.View):
     async def l_cn(self, it, b):
         d = load_json(DB_LEAVE, [])
         u_id, now_date, opts = str(it.user.id), get_thai_time().date(), []
-        # กฎข้อที่ 10: สิทธิ์แอดมินสามารถเห็นและยกเลิกของทุกคนได้
         is_admin = any(r.name in ["Admin", "ผู้ดูแล"] for r in it.user.roles)
         
         for i, e in enumerate(d):
@@ -737,8 +677,8 @@ class LeaveMainView(discord.ui.View):
                     description=f"ประเภท: {e.get('leave_category','ทั่วไป')} | เหตุผล: {e.get('reason','-')[:20]}...",
                     value=str(i)
                 ))
-        if not opts: return await it.response.send_message("❌ ไม่พบรายการที่สามารถแก้ไขได้ (ต้องเป็นการลาหลายวัน)", ephemeral=True)
-        await it.response.send_message("✏️ เลือกใบลาที่จะแก้:", view=SubMenuView(it, EditLeaveSelect(opts[:25], it)), ephemeral=True)
+        if not opts: return await it.response.send_message("❌ ไม่พบรายการที่แก้ไขได้", ephemeral=True)
+        await it.response.send_message("✏️ เลือกใบลาที่จะแก้:", view=SubMenuView(it, EditLeaveSelect(opts[:25])), ephemeral=True)
 
 class FriendSelect(discord.ui.UserSelect):
     def __init__(self):
@@ -754,10 +694,8 @@ class SubMenuView(discord.ui.View):
     @discord.ui.button(label="ปิดเมนู", style=discord.ButtonStyle.danger, row=3)
     async def cls(self, it, b):
         await it.response.defer()
-        try:
-            await it.delete_original_response()
-        except:
-            pass
+        try: await it.delete_original_response()
+        except: pass
 
 class DateSelect(discord.ui.Select):
     def __init__(self, t_id=None):
@@ -779,10 +717,8 @@ class LeaveCategorySelect(discord.ui.Select):
         super().__init__(placeholder="📝 เลือกประเภทการลา...", options=opts)
     async def callback(self, it):
         await it.response.send_modal(LeaveModal(self.m_title, self.s_v, self.e_v, self.values[0], self.t_id, self.is_f))
-        try:
-            await it.delete_original_response()
-        except:
-            pass
+        try: await it.delete_original_response()
+        except: pass
 
 @bot.command()
 @commands.has_any_role("Admin", "ผู้ดูแล")
@@ -803,8 +739,7 @@ async def backup(ctx):
                 if os.path.exists(CONFIG_PATH): f_send.append(discord.File(CONFIG_PATH))
                 await member.send("📦 นี่คือไฟล์ Backup ข้อมูลและการตั้งค่าระบบครับ:", files=f_send)
                 count += 1
-            except:
-                continue
+            except: continue
     await ctx.send(f"✅ ส่งไฟล์ Backup เข้า DM ของแอดมินทั้งหมด {count} ท่านเรียบร้อยแล้ว")
 
 @bot.event
