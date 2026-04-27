@@ -182,7 +182,7 @@ class RetryView(discord.ui.View):
         except:
             pass
 
-# --- 4. ส่วน Admin ---
+# --- 4. ส่วน Admin (คงเดิมจาก freshy) ---
 class AdminSubChannelSelect(discord.ui.ChannelSelect):
     def __init__(self):
         super().__init__(placeholder="🔍 ค้นหาห้องที่ต้องการ...", channel_types=[discord.ChannelType.text])
@@ -243,6 +243,7 @@ class AdminPanelView(discord.ui.View):
 @tasks.loop(minutes=1)
 async def daily_report_task():
     n = get_thai_time()
+    # รายวัน 00:05 น.
     if n.hour == 0 and n.minute == 5:
         cfg = load_json(CONFIG_PATH, {})
         ch_id = cfg.get("daily_ch", 0)
@@ -287,6 +288,7 @@ async def daily_report_task():
                 em.set_footer(text=f"บันทึกเมื่อ: {n.strftime('%H:%M')} น.")
                 await ch.send(embed=em)
 
+    # รายสัปดาห์ ทุกวันจันทร์ 00:10 น.
     if n.weekday() == 0 and n.hour == 0 and n.minute == 10:
         cfg = load_json(CONFIG_PATH, {})
         w_ch_id = cfg.get("weekly_ch")
@@ -429,7 +431,8 @@ async def process_edit_leave(it, idx, od, new_end_str):
                 log_em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M')} น.")
                 await log_ch.send(embed=log_em)
         
-        await it.edit_original_response(content=f"✅ แก้ไขวันสิ้นสุดของท่านเรียบร้อยแล้ว!", embed=None, view=None)
+        # จุดสำคัญ: ลบข้อความลับ "✏️ กำลังระบุวันที่เอง..." หรือ Embed ยืนยัน ทิ้งทันทีหลังทำรายการเสร็จ
+        await it.edit_original_response(content=f"✅ แก้ไขวันสิ้นสุดเป็น **{new_end_str}** เรียบร้อยแล้ว!", embed=None, view=None)
         await asyncio.sleep(3)
         try: await it.delete_original_response()
         except: pass
@@ -594,16 +597,20 @@ class SubMenuView(discord.ui.View):
 @commands.has_role("Admin")
 async def backup(ctx):
     files = []
+    # ดึงพาธไฟล์จากตัวแปรที่กำหนดไว้ในส่วนที่ 1
     if os.path.exists(DB_LEAVE):
         files.append(discord.File(DB_LEAVE))
     if os.path.exists(CONFIG_PATH):
         files.append(discord.File(CONFIG_PATH))
     
     if not files:
-        return await ctx.send("❌ ไม่พบไฟล์ข้อมูลที่จะสำรอง")
+        return await ctx.send("❌ ไม่พบไฟล์ข้อมูลที่จะสำรองในพาธ `/app/data/` กรุณาตรวจสอบการตั้งค่า Volume")
     
-    await ctx.author.send("📂 **ไฟล์ข้อมูลสำรองระบบ DMD (Backup)**", files=files)
-    await ctx.send("✅ ส่งไฟล์สำรองข้อมูลให้ในห้องแชทส่วนตัวเรียบร้อยแล้วครับ", delete_after=5)
+    try:
+        await ctx.author.send("📂 **ไฟล์ข้อมูลสำรองระบบ DMD (Backup)**", files=files)
+        await ctx.send("✅ ส่งไฟล์สำรองข้อมูลให้ในห้องแชทส่วนตัวเรียบร้อยแล้วครับ", delete_after=5)
+    except discord.Forbidden:
+        await ctx.send("❌ บอทไม่สามารถส่งข้อความส่วนตัวหาคุณได้ กรุณาเปิดรับ Direct Message (DM)")
 
 @bot.command()
 @commands.has_role("Admin")
