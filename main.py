@@ -203,6 +203,50 @@ class RetryView(discord.ui.View):
             pass
 
 # --- 4. ส่วน Admin (ปรับหัวข้อหน้าหลักตามสั่ง + หมายเหตุใหม่) ---
+class ConfirmClearView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=60)
+    @discord.ui.button(label="⚠️ ยืนยันล้างข้อมูลถาวร", style=discord.ButtonStyle.danger)
+    async def confirm(self, it: discord.Interaction, b):
+        await it.response.defer(ephemeral=True)
+        
+        # กฎข้อที่ 14: ส่ง Backup เต็มรูปแบบให้แอดมินทุกคน
+        admin_roles = ["Admin", "ผู้ดูแล"]
+        for member in it.guild.members:
+            if any(r.name in admin_roles for r in member.roles) and not member.bot:
+                try:
+                    f_send = []
+                    if os.path.exists(DB_LEAVE): f_send.append(discord.File(DB_LEAVE))
+                    if os.path.exists(CONFIG_PATH): f_send.append(discord.File(CONFIG_PATH))
+                    await member.send(f"⚠️ **แจ้งเตือนการล้างข้อมูลโดย <@{it.user.id}>**\nนี่คือไฟล์สำรองข้อมูลก่อนถูกลบทิ้งครับ:", files=f_send)
+                except:
+                    continue
+
+        # ล้างข้อมูลจริง
+        save_json(DB_LEAVE, [])
+        await update_summary_board()
+        
+        cfg = load_json(CONFIG_PATH, {})
+        log_ch_id = cfg.get("log_ch")
+        if log_ch_id:
+            log_ch = bot.get_channel(int(log_ch_id))
+            if log_ch:
+                l_em = discord.Embed(title="⚠️ ประกาศ: มีการล้างข้อมูลใบลาทั้งหมดในระบบ", color=0xf39c12)
+                l_em.description = (
+                    f"**👮 ผู้ดำเนินการ:** <@{it.user.id}>\n"
+                    f"**📅 วันที่ดำเนินการ:** {get_thai_time().strftime('%d/%m/%Y')}\n"
+                    f"**⏰ เวลา:** {get_thai_time().strftime('%H:%M น.')}\n\n"
+                    f"**📋 รายละเอียด:**\n- ทำการลบข้อมูลการลาทั้งหมดเรียบร้อยแล้ว\n- ระบบส่งไฟล์ Backup เข้า DM แอดมินทุกคนแล้ว\n\n{LONG_SEP}"
+                )
+                await log_ch.send(embed=l_em)
+            
+        await it.edit_original_response(content="✅ ล้างข้อมูลสำเร็จและสำรองไฟล์เรียบร้อย!", view=None)
+        await asyncio.sleep(3)
+        try:
+            await it.delete_original_response()
+        except:
+            pass
+
 class AdminSubChannelSelect(discord.ui.ChannelSelect):
     def __init__(self):
         super().__init__(placeholder="🔍 ค้นหาห้องที่ต้องการ...", channel_types=[discord.ChannelType.text])
@@ -272,6 +316,12 @@ class AdminPanelView(discord.ui.View):
             discord.SelectOption(label="📊 สรุปประวัติรายสัปดาห์", value="weekly_ch")
         ]
         await it.response.send_message("🛠 เลือกหัวข้อที่ต้องการตั้งค่า:", view=SubMenuView(it, AdminCatSelect(opts)), ephemeral=True)
+    
+    # กฎข้อที่ 13: ปุ่มล้างข้อมูลทั้งหมด
+    @discord.ui.button(label="🗑️ ล้างข้อมูลทั้งหมด", style=discord.ButtonStyle.danger)
+    async def clear_all(self, it, b):
+        txt = "⚠️ **คุณยืนยันที่จะล้างข้อมูลใบลาทั้งหมดใช่หรือไม่?**\nการกระทำนี้จะลบข้อมูลถาวรและส่งไฟล์ Backup ให้แอดมินทุกคน"
+        await it.response.send_message(content=txt, view=ConfirmClearView(), ephemeral=True)
 
 # --- 5. งานรายวัน และ รายสัปดาห์ (Auto Cleanup 30 วัน + รายสัปดาห์คลีน) ---
 @tasks.loop(minutes=1)
@@ -414,8 +464,9 @@ class CancelReasonModal(discord.ui.Modal):
                 log_ch = bot.get_channel(int(log_ch_id))
                 if log_ch:
                     log_em = discord.Embed(title="📌 บันทึกยกเลิกการแจ้งลา", color=0xe74c3c)
-                    # ระบุคนแจ้งยกเลิกแทน
-                    is_on_behalf = self.od['user_id'] != str(it.user.id)
+                    
+                    # กฎข้อที่ 11: เช็กชื่อผู้ยกเลิกแทนจากเจ้าของใบลา
+                    is_on_behalf = str(it.user.id) != self.od['target_id']
                     on_behalf = f"\n**👮 ผู้ยกเลิกแทน:** <@{it.user.id}>" if is_on_behalf else ""
                     dr = self.od['start_date'] if self.od['start_date'] == self.od['end_date'] else f"{self.od['start_date']} - {self.od['end_date']}"
                     
@@ -433,8 +484,10 @@ class CancelReasonModal(discord.ui.Modal):
             
             await it.edit_original_response(content=f"❌ ยกเลิกรายการแจ้งลาเรียบร้อยแล้ว!", view=None)
         await asyncio.sleep(3)
-        try: await it.delete_original_response()
-        except: pass
+        try:
+            await it.delete_original_response()
+        except:
+            pass
 
 class ConfirmCancelView(discord.ui.View):
     def __init__(self, target_idx, od):
@@ -446,8 +499,10 @@ class ConfirmCancelView(discord.ui.View):
     @discord.ui.button(label="❌ ไม่ยกเลิกแล้ว", style=discord.ButtonStyle.danger)
     async def cancel(self, it, b):
         await it.response.defer()
-        try: await it.delete_original_response()
-        except: pass
+        try:
+            await it.delete_original_response()
+        except:
+            pass
 
 class CancelSelect(discord.ui.Select):
     def __init__(self, opts):
@@ -499,8 +554,10 @@ async def process_edit_leave(it, idx, od, new_end_str):
         
         await it.edit_original_response(content=f"✏️ แก้ไขข้อมูลการลาเรียบร้อยแล้ว!", embed=None, view=None)
         await asyncio.sleep(3)
-        try: await it.delete_original_response()
-        except: pass
+        try:
+            await it.delete_original_response()
+        except:
+            pass
 
 class EditRetryView(discord.ui.View):
     def __init__(self, idx, od, p_it):
@@ -509,8 +566,10 @@ class EditRetryView(discord.ui.View):
     @discord.ui.button(label="📝 แก้ไขวันที่อีกครั้ง", style=discord.ButtonStyle.primary)
     async def retry(self, it, b):
         await it.response.send_modal(EditDateModal(self.idx, self.od, self.p_it))
-        try: await it.delete_original_response()
-        except: pass
+        try:
+            await it.delete_original_response()
+        except:
+            pass
 
 class EditDateModal(discord.ui.Modal):
     def __init__(self, idx, od, parent_it=None):
@@ -536,10 +595,12 @@ class EditDateModal(discord.ui.Modal):
         if new_days > 15:
             return await it.response.send_message(content=f"❌ **ไม่สามารถลาเกิน 15 วันได้ (ยอดใหม่คือ {new_days} วัน)**\nโปรดติดต่อแอดมินเพื่อแก้ไขรายการนี้", view=EditRetryView(self.idx, self.od, self.parent_it), ephemeral=True)
 
-        # แก้บั๊ก: ลบ Interaction เก่า
+        # แก้บั๊ก Interaction ค้าง (จุดที่แจ้งล้มเหลว)
         if self.parent_it:
-            try: await self.parent_it.delete_original_response()
-            except: pass
+            try:
+                await self.parent_it.delete_original_response()
+            except:
+                pass
             
         old_days = (datetime.strptime(self.od['end_date'], "%d/%m/%Y") - s_dt).days + 1
         diff = new_days - old_days
@@ -569,8 +630,10 @@ class ConfirmEditView(discord.ui.View):
     @discord.ui.button(label="❌ ยกเลิก", style=discord.ButtonStyle.danger)
     async def cancel(self, it, b):
         await it.response.defer()
-        try: await it.delete_original_response()
-        except: pass
+        try:
+            await it.delete_original_response()
+        except:
+            pass
 
 class EditDateSelect(discord.ui.Select):
     def __init__(self, idx, od, parent_it=None):
@@ -584,8 +647,10 @@ class EditDateSelect(discord.ui.Select):
             opts.append(discord.SelectOption(label=d_str, value=d_str))
         opts.append(discord.SelectOption(label="➕ ระบุวันที่เอง", value="manual", emoji="✏️"))
         super().__init__(placeholder="📅 เลือกวันที่กลับมาจริง...", options=opts)
+    
     async def callback(self, it: discord.Interaction):
         if self.values[0] == "manual": 
+            # กฎข้อที่ 8: ใช้ it.response.send_modal โดยตรงเพื่อป้องกัน Interaction Failed
             await it.response.send_modal(EditDateModal(self.idx, self.od, self.parent_it))
         else:
             val = self.values[0]
@@ -618,7 +683,7 @@ class EditLeaveSelect(discord.ui.Select):
         if 0 <= idx < len(d):
             await it.edit_original_response(content="📅 **เลือกวันที่สิ้นสุดใหม่:**", view=SubMenuView(it, EditDateSelect(idx, d[idx], it)))
 
-# --- 8. เมนูหลัก 4 ปุ่ม (คงเดิมทุกลิงก์ custom_id) ---
+# --- 8. เมนูหลัก 4 ปุ่ม (คงเดิมทุกลิงก์ custom_id + เพิ่มสิทธิ์แอดมิน) ---
 class LeaveMainView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -633,8 +698,11 @@ class LeaveMainView(discord.ui.View):
     async def l_cn(self, it, b):
         d = load_json(DB_LEAVE, [])
         u_id, now_date, opts = str(it.user.id), get_thai_time().date(), []
+        # กฎข้อที่ 10: สิทธิ์แอดมินสามารถเห็นและยกเลิกของทุกคนได้
+        is_admin = any(r.name in ["Admin", "ผู้ดูแล"] for r in it.user.roles)
+        
         for i, e in enumerate(d):
-            if e['user_id'] == u_id or e['target_id'] == u_id:
+            if is_admin or e['user_id'] == u_id or e['target_id'] == u_id:
                 try:
                     if datetime.strptime(e['end_date'], "%d/%m/%Y").date() < now_date: continue
                 except: continue
@@ -654,8 +722,10 @@ class LeaveMainView(discord.ui.View):
     async def l_ed(self, it, b):
         d = load_json(DB_LEAVE, [])
         u_id, now_date, opts = str(it.user.id), get_thai_time().date(), []
+        is_admin = any(r.name in ["Admin", "ผู้ดูแล"] for r in it.user.roles)
+
         for i, e in enumerate(d):
-            if (e['user_id'] == u_id or e['target_id'] == u_id) and e['start_date'] != e['end_date']:
+            if (is_admin or e['user_id'] == u_id or e['target_id'] == u_id) and e['start_date'] != e['end_date']:
                 try:
                     if datetime.strptime(e['end_date'], "%d/%m/%Y").date() < now_date: continue
                 except: continue
@@ -685,8 +755,10 @@ class SubMenuView(discord.ui.View):
     @discord.ui.button(label="ปิดเมนู", style=discord.ButtonStyle.danger, row=3)
     async def cls(self, it, b):
         await it.response.defer()
-        try: await it.delete_original_response()
-        except: pass
+        try:
+            await it.delete_original_response()
+        except:
+            pass
 
 class DateSelect(discord.ui.Select):
     def __init__(self, t_id=None):
@@ -708,25 +780,33 @@ class LeaveCategorySelect(discord.ui.Select):
         super().__init__(placeholder="📝 เลือกประเภทการลา...", options=opts)
     async def callback(self, it):
         await it.response.send_modal(LeaveModal(self.m_title, self.s_v, self.e_v, self.values[0], self.t_id, self.is_f))
-        try: await it.delete_original_response()
-        except: pass
+        try:
+            await it.delete_original_response()
+        except:
+            pass
 
 @bot.command()
 @commands.has_any_role("Admin", "ผู้ดูแล")
 async def admin(ctx):
     await ctx.send(embed=discord.Embed(title="🕹 Dark Monday Admin Panel"), view=AdminPanelView())
 
+# --- 9. ระบบ Backup (ส่งข้อมูล 2 ไฟล์ให้แอดมินทุกคน) ---
 @bot.command()
-@commands.has_permissions(administrator=True)
+@commands.has_any_role("Admin", "ผู้ดูแล")
 async def backup(ctx):
-    if os.path.exists(DB_LEAVE):
-        try:
-            await ctx.author.send("📦 นี่คือไฟล์ Backup ข้อมูลการลาล่าสุดครับ:", file=discord.File(DB_LEAVE))
-            await ctx.send("✅ ส่งไฟล์ Backup ไปที่ DM ของคุณเรียบร้อยแล้ว")
-        except:
-            await ctx.send("❌ ไม่สามารถส่ง DM ได้ โปรดเปิดรับข้อความจากคนแปลกหน้า")
-    else:
-        await ctx.send("❌ ไม่พบไฟล์ข้อมูลในระบบ")
+    admin_roles = ["Admin", "ผู้ดูแล"]
+    count = 0
+    for member in ctx.guild.members:
+        if any(r.name in admin_roles for r in member.roles) and not member.bot:
+            try:
+                f_send = []
+                if os.path.exists(DB_LEAVE): f_send.append(discord.File(DB_LEAVE))
+                if os.path.exists(CONFIG_PATH): f_send.append(discord.File(CONFIG_PATH))
+                await member.send("📦 นี่คือไฟล์ Backup ข้อมูลและการตั้งค่าระบบครับ:", files=f_send)
+                count += 1
+            except:
+                continue
+    await ctx.send(f"✅ ส่งไฟล์ Backup เข้า DM ของแอดมินทั้งหมด {count} ท่านเรียบร้อยแล้ว")
 
 @bot.event
 async def on_ready():
