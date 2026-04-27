@@ -571,34 +571,53 @@ class EditRetryView(discord.ui.View):
         except:
             pass
 
+# --- ส่วนที่ได้รับการแก้ไข: ระบบแก้ไขวันสิ้นสุด (ป้องกันการโต้ตอบล้มเหลว) ---
+
 class EditDateModal(discord.ui.Modal):
-    def __init__(self, idx, od, parent_it=None):
+    def __init__(self, idx, od, parent_msg=None):
         super().__init__(title="ระบุวันที่กลับมาจริง")
-        self.idx, self.od, self.parent_it = idx, od, parent_it
-        self.new_e = discord.ui.TextInput(label='วันที่กลับมาจริง (วว/ดด/ปปปป) *ใช้ ค.ศ. เท่านั้น', placeholder='ตัวอย่าง: 28/04/2026', required=True)
+        self.idx, self.od, self.parent_msg = idx, od, parent_msg
+        self.new_e = discord.ui.TextInput(
+            label='วันที่กลับมาจริง (วว/ดด/ปปปป) *ใช้ ค.ศ. เท่านั้น', 
+            placeholder='ตัวอย่าง: 28/04/2026', 
+            required=True
+        )
         self.add_item(self.new_e)
+
     async def on_submit(self, it: discord.Interaction):
         val = self.new_e.value.strip()
         
-        # ตรวจสอบ ค.ศ.
+        # 1. ตรวจสอบรูปแบบ ค.ศ. และความถูกต้องของวันที่
         if not validate_date(val):
-            return await it.response.send_message("❌ รูปแบบวันที่ไม่ถูกต้อง หรือไม่ใช่ปี ค.ศ.!", view=EditRetryView(self.idx, self.od, self.parent_it), ephemeral=True)
+            return await it.response.send_message(
+                content="❌ รูปแบบวันที่ไม่ถูกต้อง หรือไม่ใช่ปี ค.ศ.!", 
+                view=EditRetryView(self.idx, self.od, self.parent_msg), 
+                ephemeral=True
+            )
         
         s_dt = datetime.strptime(self.od['start_date'], "%d/%m/%Y")
         e_dt = datetime.strptime(val, "%d/%m/%Y")
         
         if e_dt < s_dt:
-            return await it.response.send_message("❌ วันที่กลับมาจริงต้องไม่มาก่อนวันที่เริ่มลา!", view=EditRetryView(self.idx, self.od, self.parent_it), ephemeral=True)
+            return await it.response.send_message(
+                content="❌ วันที่กลับมาจริงต้องไม่มาก่อนวันที่เริ่มลา!", 
+                view=EditRetryView(self.idx, self.od, self.parent_msg), 
+                ephemeral=True
+            )
 
-        # กฎข้อที่ 2: แก้ไขแล้วต้องไม่เกิน 15 วัน
+        # 2. กฎการลาไม่เกิน 15 วัน
         new_days = (e_dt - s_dt).days + 1
         if new_days > 15:
-            return await it.response.send_message(content=f"❌ **ไม่สามารถลาเกิน 15 วันได้ (ยอดใหม่คือ {new_days} วัน)**\nโปรดติดต่อแอดมินเพื่อแก้ไขรายการนี้", view=EditRetryView(self.idx, self.od, self.parent_it), ephemeral=True)
+            return await it.response.send_message(
+                content=f"❌ ไม่สามารถลาเกิน 15 วันได้ (ยอดใหม่คือ {new_days} วัน)", 
+                view=EditRetryView(self.idx, self.od, self.parent_msg), 
+                ephemeral=True
+            )
 
-        # แก้บั๊ก Interaction ค้าง (จุดที่แจ้งล้มเหลว)
-        if self.parent_it:
+        # 3. แก้ไขบั๊ก: ลบข้อความเมนูเลือกวันที่ทิ้งเมื่อผ่านการตรวจสอบแล้ว เพื่อความสะอาด
+        if self.parent_msg:
             try:
-                await self.parent_it.delete_original_response()
+                await self.parent_msg.delete()
             except:
                 pass
             
@@ -606,7 +625,8 @@ class EditDateModal(discord.ui.Modal):
         diff = new_days - old_days
         diff_txt = f"เพิ่มขึ้น {diff} วัน" if diff > 0 else f"ลดลง {abs(diff)} วัน" if diff < 0 else "จำนวนวันเท่าเดิม"
 
-        em = discord.Embed(title="確認 | ตรวจสอบความถูกต้อง", color=0xffffff) # สีขาวตามสั่ง
+        # 4. แสดงหน้าจอยืนยัน (Embed สีขาว)
+        em = discord.Embed(title="確認 | ตรวจสอบความถูกต้อง", color=0xffffff)
         em.description = (
             f"**👤 สมาชิก:** <@{self.od['target_id']}>\n"
             f"**📅 วันที่ลาเดิม:** {self.od['start_date']} - {self.od['end_date']} `({old_days} วัน)`\n"
@@ -616,48 +636,32 @@ class EditDateModal(discord.ui.Modal):
         )
         await it.response.send_message(embed=em, view=ConfirmEditView(self.idx, self.od, val), ephemeral=True)
 
-class ConfirmEditView(discord.ui.View):
-    def __init__(self, idx, od, new_end):
-        super().__init__(timeout=60)
-        self.idx, self.od, self.new_end = idx, od, new_end
-    @discord.ui.button(label="✅ ยืนยันการแก้ไข", style=discord.ButtonStyle.success)
-    async def confirm(self, it, b):
-        await it.response.defer(ephemeral=True)
-        await process_edit_leave(it, self.idx, self.od, self.new_end)
-    @discord.ui.button(label="📅 เลือกวันใหม่", style=discord.ButtonStyle.primary)
-    async def reselect(self, it, b):
-        await it.response.edit_message(content="📅 **กรุณาเลือกวันที่สิ้นสุดใหม่อีกครั้ง:**", embed=None, view=SubMenuView(it, EditDateSelect(self.idx, self.od, it)))
-    @discord.ui.button(label="❌ ยกเลิก", style=discord.ButtonStyle.danger)
-    async def cancel(self, it, b):
-        await it.response.defer()
-        try:
-            await it.delete_original_response()
-        except:
-            pass
-
 class EditDateSelect(discord.ui.Select):
     def __init__(self, idx, od, parent_it=None):
         self.idx, self.od, self.parent_it = idx, od, parent_it
         s_dt = datetime.strptime(od['start_date'], "%d/%m/%Y")
         e_dt = datetime.strptime(od['end_date'], "%d/%m/%Y")
+        
         opts = []
+        # แสดงตัวเลือกวันที่ที่เป็นไปได้ (สูงสุด 24 ตัวเลือกตามข้อจำกัด Discord)
         for i in range((e_dt - s_dt).days + 1):
             if i >= 24: break
             d_str = (s_dt + timedelta(days=i)).strftime("%d/%m/%Y")
             opts.append(discord.SelectOption(label=d_str, value=d_str))
+        
         opts.append(discord.SelectOption(label="➕ ระบุวันที่เอง", value="manual", emoji="✏️"))
         super().__init__(placeholder="📅 เลือกวันที่กลับมาจริง...", options=opts)
     
     async def callback(self, it: discord.Interaction):
         if self.values[0] == "manual": 
-            # กฎข้อที่ 8: ใช้ it.response.send_modal โดยตรงเพื่อป้องกัน Interaction Failed
-            await it.response.send_modal(EditDateModal(self.idx, self.od, self.parent_it))
+            # แก้ไขจุดล้มเหลว: เรียก Modal ทันทีผ่าน Interaction ล่าสุด (it) 
+            # และส่ง it.message เข้าไปเพื่อให้ Modal ลบทิ้งเมื่อทำงานเสร็จ
+            await it.response.send_modal(EditDateModal(self.idx, self.od, it.message))
         else:
+            # กรณีเลือกจากรายการที่มีให้
             val = self.values[0]
-            # ตรวจสอบ 15 วันในกรณีเลือกจากเมนู (แม้ปกติจะไม่เกินอยู่แล้ว)
             s_dt = datetime.strptime(self.od['start_date'], "%d/%m/%Y")
-            e_dt = datetime.strptime(val, "%d/%m/%Y")
-            new_days = (e_dt - s_dt).days + 1
+            new_days = (datetime.strptime(val, "%d/%m/%Y") - s_dt).days + 1
             old_days = (datetime.strptime(self.od['end_date'], "%d/%m/%Y") - s_dt).days + 1
             diff = new_days - old_days
             diff_txt = f"เพิ่มขึ้น {diff} วัน" if diff > 0 else f"ลดลง {abs(diff)} วัน" if diff < 0 else "จำนวนวันเท่าเดิม"
