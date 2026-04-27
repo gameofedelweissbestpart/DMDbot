@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 TOKEN = os.getenv('DISCORD_TOKEN')
 CONFIG_PATH = '/app/data/config.json'
 DB_LEAVE = '/app/data/gang_leaves.json'
+LONG_SEP = "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"
 
 def load_json(p, d):
     if os.path.exists(p):
@@ -40,7 +41,7 @@ def validate_date(d_str):
     except:
         return False
 
-# --- 2. ระบบตาราง Real-time (คงเดิมจากไฟล์ฐาน) ---
+# --- 2. ระบบตาราง Real-time (คงเดิมจากไฟล์ฐาน + ปรับหัวข้อ/เส้นคั่น/แท็กชื่อ) ---
 async def update_summary_board():
     cfg = load_json(CONFIG_PATH, {})
     ch_id = cfg.get("realtime_ch")
@@ -63,28 +64,30 @@ async def update_summary_board():
         except:
             continue
 
-    em = discord.Embed(title="📋 รายชื่อสมาชิกที่แจ้งลา (Real-time)", color=0xf1c40f if active else 0x2ecc71)
+    em = discord.Embed(color=0xf1c40f if active else 0x2ecc71)
+    desc = f"# 📋 รายชื่อสมาชิกที่แจ้งลาของวันนี้ (Real-time)\n{LONG_SEP}\n\n"
+    
     if not active:
-        em.description = "✅ **ขณะนี้สมาชิกแก๊ง DMD ทุกคนพร้อมรัน (ยังไม่มีการแจ้งลา)**\n\u200b"
+        desc += "> 🍃 **ขณะนี้ยังไม่มีสมาชิกแจ้งลาในระบบ**\n\n"
     else:
-        txt = ""
         for e in active:
-            txt += f"🔹 <@{e['target_id']}> `[{e.get('leave_category','ทั่วไป')}]`"
-            if e['user_id'] != e['target_id']:
-                txt += f"\n└ **ผู้แจ้งลาแทน:** <@{e['user_id']}>"
-            
+            desc += f"🔹 <@{e['target_id']}> `[{e.get('leave_category','ทั่วไป')}]`\n"
             dr = e['start_date'] if e['start_date'] == e['end_date'] else f"{e['start_date']} - {e['end_date']}"
-            txt += f"\n└ **ลาวันที่:** {dr} `({e['total_days']} วัน)`\n└ **เหตุผลที่ลา:** {e['reason']}\n\n"
+            desc += f"└ **วันที่ลา:** {dr} `(รวม {e['total_days']} วัน)`\n"
+            desc += f"└ **เหตุผลที่ลา:** {e['reason']}\n"
+            if e['user_id'] != e['target_id']:
+                desc += f"└ **ผู้แจ้งแทน:** <@{e['user_id']}>\n"
+            desc += "\n"
         
-        footer_info = "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
-        footer_info += f"**📊 สรุปจำนวนคนลาตอนนี้:   {len(active)} คน**\n"
-        footer_info += f"**📅 อัปเดตล่าสุด:   {get_thai_time().strftime('%d/%m/%Y %H:%M น.')}**"
-        em.description = txt + footer_info
+    desc += f"{LONG_SEP}\n"
+    desc += f"**📊 สรุปจำนวนคนลาวันนี้: {len(active)} คน**\n"
+    desc += f"**📅 อัปเดตล่าสุด: {get_thai_time().strftime('%d/%m/%Y %H:%M น.')}**"
+    em.description = desc
 
     target = None
     async for m in channel.history(limit=50):
         if m.author == bot.user and m.embeds and len(m.embeds) > 0:
-            if m.embeds[0].title == "📋 รายชื่อสมาชิกที่แจ้งลา (Real-time)":
+            if m.embeds[0].description and "รายชื่อสมาชิกที่แจ้งลาของวันนี้" in m.embeds[0].description:
                 target = m
                 break
     
@@ -93,7 +96,7 @@ async def update_summary_board():
     else:
         await channel.send(embed=em)
 
-# --- 3. ระบบแจ้งลาและ Log (คงเดิมจากไฟล์ฐาน) ---
+# --- 3. ระบบแจ้งลาและ Log (คงเดิมจากไฟล์ฐาน + ปรับ Log ใหม่ + ลบข้อความ 3 วิ) ---
 class LeaveModal(discord.ui.Modal):
     def __init__(self, title, s_v, e_v, cat_val, t_id=None, is_f=False, old_re=""):
         super().__init__(title=title)
@@ -150,20 +153,21 @@ class LeaveModal(discord.ui.Modal):
             log_ch = bot.get_channel(int(log_ch_id))
             if log_ch:
                 is_fr = True if self.t_id else False
-                log_em = discord.Embed(title="📌 บันทึกการแจ้งลาแทนเพื่อน" if is_fr else "📌 บันทึกการแจ้งลาใหม่", color=0x3498db if is_fr else 0x2ecc71)
-                log_em.add_field(name="👤 สมาชิกที่ลา", value=f"<@{target_uid}>", inline=True)
-                if is_fr:
-                    log_em.add_field(name="👮 ผู้แจ้งลาแทน", value=it.user.mention, inline=True)
+                log_em = discord.Embed(title="📌 บันทึกการแจ้งลาใหม่", color=0x2ecc71)
+                on_behalf = f"\n**👮 ผู้แจ้งลาแทน:** <@{it.user.id}>" if self.t_id else ""
+                dr = s if s == e else f"{s} - {e}"
                 
-                date_display = s if s == e else f"{s} - {e}"
-                log_em.add_field(name="📅 วันที่", value=f"{date_display} `({days} วัน)`", inline=False)
-                
-                log_em.add_field(name="📝 ประเภท", value=self.cat_val, inline=True)
-                log_em.add_field(name="💬 เหตุผล", value=self.re.value, inline=False)
+                log_em.description = (
+                    f"**👤 สมาชิกที่ลา:** <@{target_uid}>{on_behalf}\n\n"
+                    f"**📝 ประเภท:** {self.cat_val}\n"
+                    f"**📅 วันที่ลา:** {dr} `(รวม {days} วัน)`\n"
+                    f"**💬 เหตุผล:** {self.re.value}\n\n"
+                    f"{LONG_SEP}"
+                )
                 log_em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M')} น.")
                 await log_ch.send(embed=log_em)
         
-        await it.edit_original_response(content='✅ บันทึกใบลาของท่านเรียบร้อยแล้ว!', view=None)
+        await it.edit_original_response(content='✅ ระบบบันทึกใบลาของคุณเรียบร้อยแล้ว!', view=None)
         await asyncio.sleep(3)
         try:
             await it.delete_original_response()
@@ -182,7 +186,7 @@ class RetryView(discord.ui.View):
         except:
             pass
 
-# --- 4. ส่วน Admin (จุดแก้ไข: เพิ่มคำอธิบายหน้าเมนูใหม่) ---
+# --- 4. ส่วน Admin (คงเดิมจากไฟล์ฐาน + หมายเหตุ 4 ข้อเป๊ะๆ) ---
 class AdminSubChannelSelect(discord.ui.ChannelSelect):
     def __init__(self):
         super().__init__(placeholder="🔍 ค้นหาห้องที่ต้องการ...", channel_types=[discord.ChannelType.text])
@@ -206,17 +210,16 @@ class AdminSubMenuView(discord.ui.View):
         save_json(CONFIG_PATH, cfg)
         
         if self.cat == "leave_ch":
-            # แก้ไขคำอธิบายหน้าเมนูหลักตามที่สั่ง
             em = discord.Embed(
                 title="ระบบการแจ้งลาแก๊ง Dark Monday", 
-                description="กรุณากดปุ่มด้านล่างเพื่อทำรายการที่ท่านต้องการ\n\n⚠️หมายเหตุ⚠️\n- เลือกเมนูแจ้งลาในระบบให้ถูกต้อง\n- การลงวันที่ในระบบใช้ปี ค.ศ. เท่านั้น เช่น 26/04/2026\n- ระบุเหตุผลการลาให้ชัดเจน (เช่น ติด OC, ธุระทางบ้าน, ลาป่วย)\n- ระบบจะบันทึกข้อมูลและแจ้งเตือนไปยังผู้ดูแลให้อัตโนมัติ", 
+                description="กรุณากดปุ่มด้านล่างเพื่อทำรายการที่ท่านต้องการ\n\n**⚠️ หมายเหตุสำคัญ ⚠️**\n1. สมาชิกต้องแจ้งลาล่วงหน้าอย่างน้อย 1 วัน\n2. กรณีลาฉุกเฉินให้ทักหาแอดมินโดยตรง\n3. การแจ้งลาเท็จจะมีบทลงโทษตามกฎของกลุ่ม\n4. ตรวจสอบวันที่ให้ถูกต้องก่อนกดยืนยัน", 
                 color=0x3498db
             )
             await bot.get_channel(int(self.temp_ch)).send(embed=em, view=LeaveMainView())
         elif self.cat == "realtime_ch":
             await update_summary_board()
         
-        await it.edit_original_response(content=f"✅ ตั้งค่าห้องสำหรับ **{self.cat}** สำเร็จ! (ข้อความนี้จะหายไปเองใน 3 วินาที)", view=None)
+        await it.edit_original_response(content=f"✅ ตั้งค่าห้องสำหรับ **{self.cat}** สำเร็จ!", view=None)
         await asyncio.sleep(3)
         try:
             await it.delete_original_response()
@@ -244,7 +247,7 @@ class AdminPanelView(discord.ui.View):
         ]
         await it.response.send_message("🛠 เลือกหัวข้อที่ต้องการตั้งค่า:", view=SubMenuView(it, AdminCatSelect(opts)), ephemeral=True)
 
-# --- 5. งานรายวัน และ รายสัปดาห์ (จุดแก้ไข: Auto Cleanup และ Weekly Logic ใหม่) ---
+# --- 5. งานรายวัน และ รายสัปดาห์ (คงเดิม + Weekly Report รูปแบบคลีน) ---
 @tasks.loop(minutes=1)
 async def daily_report_task():
     n = get_thai_time()
@@ -307,7 +310,7 @@ async def daily_report_task():
                 em.set_footer(text=f"บันทึกเมื่อ: {n.strftime('%H:%M')} น.")
                 await ch.send(embed=em)
 
-    # รายสัปดาห์ ทุกวันจันทร์ 00:10 น. (จุดแก้ไข: เงื่อนไข Role และรูปแบบการแสดงผลใหม่)
+    # รายสัปดาห์ ทุกวันจันทร์ 00:10 น. (ปรับการแสดงผลรายชื่อ + กรอง Role)
     if n.weekday() == 0 and n.hour == 0 and n.minute == 10:
         cfg = load_json(CONFIG_PATH, {})
         w_ch_id = cfg.get("weekly_ch")
@@ -325,7 +328,7 @@ async def daily_report_task():
                 end_range = n.date() - timedelta(days=1)
                 start_range = end_range - timedelta(days=6)
                 
-                user_stats = {} # {user_id: {'leaves': count, 'days': sum}}
+                user_stats = {}
                 for m in valid_members:
                     user_stats[str(m.id)] = {'leaves': 0, 'days': 0, 'member': m}
 
@@ -343,39 +346,38 @@ async def daily_report_task():
                                 user_stats[t_id]['days'] += days
                         except: continue
 
-                em = discord.Embed(title="📊 สรุปยอดการลาสะสมรายสัปดาห์ (DMD Weekly Report)", color=0x5865f2)
-                em.description = f"**ประจำวันที่ {start_range.strftime('%d/%m/%Y')} - {end_range.strftime('%d/%m/%Y')}**\n\n"
+                em = discord.Embed(title="📊 สรุปรายชื่อการแจ้งลาประจำสัปดาห์", color=0x2b2d31)
                 
-                # แยกคนลาและคนไม่ลา
                 left_list = [v for k, v in user_stats.items() if v['leaves'] > 0]
                 ready_list = [v for k, v in user_stats.items() if v['leaves'] == 0]
                 
-                msg_left = "**📑 รายชื่อสมาชิกที่มีประวัติการลา:**\n"
-                if not left_list: msg_left += "• ไม่มีประวัติการลาในสัปดาห์นี้\n"
+                msg_left = "```\n"
+                if not left_list: msg_left += "ไม่มีรายชื่อ\n"
                 else:
                     for s in sorted(left_list, key=lambda x: x['leaves'], reverse=True):
-                        msg_left += f"• **{s['member'].display_name}** — ลา `{s['leaves']} ครั้ง` (รวม `{s['days']} วัน`)\n"
-                
-                msg_ready = "\n**✅ รายชื่อสมาชิกที่พร้อมรัน (ไม่ลาเลยในสัปดาห์นี้):**\n"
-                if not ready_list: msg_ready += "• ไม่มีสมาชิกที่พร้อมรัน\n"
+                        msg_left += f"{s['member'].display_name}\n"
+                msg_left += "```"
+
+                msg_ready = "```\n"
+                if not ready_list: msg_ready += "ไม่มีรายชื่อ\n"
                 else:
                     for s in ready_list:
-                        msg_ready += f"• **{s['member'].display_name}**\n"
+                        msg_ready += f"{s['member'].display_name}\n"
+                msg_ready += "```"
                 
-                total_leave_tickets = sum(s['leaves'] for s in left_list)
-                total_leave_days = sum(s['days'] for s in left_list)
+                em.add_field(name="✅ สมาชิกที่แจ้งลา", value=msg_left, inline=False)
+                em.add_field(name="❌ สมาชิกที่ไม่ได้แจ้งลา", value=msg_ready, inline=False)
                 
-                summary_box = "\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n**📊 ภาพรวมสัปดาห์นี้:**\n"
-                summary_box += f"• จำนวนสมาชิกทั้งหมด: `{len(valid_members)} คน`\n"
-                summary_box += f"• สมาชิกที่แจ้งลา: `{len(left_list)} คน`\n"
-                summary_box += f"• สมาชิกที่พร้อมรัน: `{len(ready_list)} คน`\n"
-                summary_box += f"• ใบลาทั้งหมด: `{total_leave_tickets} ใบ` | รวมวันลาสะสม: `{total_leave_days} วัน`"
-                
-                em.description += msg_left + msg_ready + summary_box
+                summary_box = (
+                    f"จำนวนคนทั้งหมดที่มีสิทธิ์: {len(valid_members)} คน\n"
+                    f"แจ้งลาแล้ว: {len(left_list)} คน\n"
+                    f"ยังไม่ได้แจ้งลา: {len(ready_list)} คน"
+                )
+                em.add_field(name="📌 ภาพรวม", value=summary_box, inline=False)
                 em.set_footer(text=f"บันทึกเมื่อ: {n.strftime('%d/%m/%Y %H:%M น.')}")
                 await w_ch.send(embed=em)
 
-# --- 6. ระบบยกเลิกใบลา (คงเดิมจากไฟล์ฐาน) ---
+# --- 6. ระบบยกเลิกใบลา (คงเดิมจากไฟล์ฐาน + Log ใหม่ + ลบข้อความ 3 วิ) ---
 class CancelReasonModal(discord.ui.Modal):
     def __init__(self, target_idx, od):
         super().__init__(title="ระบุเหตุผลการยกเลิก")
@@ -396,18 +398,21 @@ class CancelReasonModal(discord.ui.Modal):
                 log_ch = bot.get_channel(int(log_ch_id))
                 if log_ch:
                     log_em = discord.Embed(title="📌 บันทึกยกเลิกการแจ้งลา", color=0xe74c3c)
-                    log_em.add_field(name="👤 สมาชิกที่ลา", value=f"<@{self.od['target_id']}>", inline=True)
-                    if self.od['user_id'] != str(it.user.id): 
-                        log_em.add_field(name="👮 ผู้ยกเลิก", value=it.user.mention, inline=True)
+                    on_behalf = f"\n**👮 ผู้แจ้งยกเลิกแทน:** <@{it.user.id}>" if self.od['user_id'] != str(it.user.id) else ""
                     dr = self.od['start_date'] if self.od['start_date'] == self.od['end_date'] else f"{self.od['start_date']} - {self.od['end_date']}"
-                    log_em.add_field(name="📅 วันที่เคยแจ้ง", value=f"{dr} `({self.od.get('total_days', 1)} วัน)`", inline=False)
-                    log_em.add_field(name="📝 ประเภท", value=self.od.get('leave_category', 'ทั่วไป'), inline=True)
-                    log_em.add_field(name="💬 เหตุผลที่เคยแจ้ง", value=self.od.get('reason', '-'), inline=False)
-                    log_em.add_field(name="🛑 เหตุผลที่ยกเลิก", value=self.reason.value, inline=False)
+                    
+                    log_em.description = (
+                        f"**👤 สมาชิกที่ลา:** <@{self.od['target_id']}>{on_behalf}\n\n"
+                        f"**📝 ประเภท:** {self.od.get('leave_category', 'ทั่วไป')}\n"
+                        f"**📅 วันที่ลา:** {dr} `(รวม {self.od.get('total_days', 1)} วัน)`\n"
+                        f"**💬 เหตุผลเดิมที่แจ้ง:** {self.od.get('reason', '-')}\n"
+                        f"**🛑 เหตุผลที่ยกเลิก:** {self.reason.value}\n\n"
+                        f"{LONG_SEP}"
+                    )
                     log_em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M')} น.")
                     await log_ch.send(embed=log_em)
             
-            await it.edit_original_response(content=f"✅ ยกเลิกใบลาของท่านเรียบร้อยแล้ว!", view=None)
+            await it.edit_original_response(content=f"❌ ยกเลิกรายการแจ้งลาเรียบร้อยแล้ว!", view=None)
         await asyncio.sleep(3)
         try: await it.delete_original_response()
         except: pass
@@ -438,35 +443,42 @@ class CancelSelect(discord.ui.Select):
             txt = f"⚠️ **แน่ใจหรือไม่ที่จะยกเลิกการลานี้?**\n👤 **คนลา:** <@{od['target_id']}>\n📝 **ประเภท:** `{od.get('leave_category','ทั่วไป')}`\n📅 **วันที่:** {dr} `({od.get('total_days', 1)} วัน)`\n💬 **เหตุผลเดิม:** {od.get('reason','-')}"
             await it.edit_original_response(content=txt, view=ConfirmCancelView(idx, od))
 
-# --- 7. ระบบแก้ไขวันสิ้นสุด (จุดแก้ไข: Embed ขาว + ลบข้อความลับ + Log ละเอียด) ---
+# --- 7. ระบบแก้ไขวันสิ้นสุด (คงเดิมจากไฟล์ฐาน + Embed ขาว + Log คำนวณวัน) ---
 async def process_edit_leave(it, idx, od, new_end_str):
     d = load_json(DB_LEAVE, [])
     old_e = od['end_date']
     if 0 <= idx < len(d):
+        old_days = (datetime.strptime(old_e, "%d/%m/%Y") - datetime.strptime(od['start_date'], "%d/%m/%Y")).days + 1
+        new_days = (datetime.strptime(new_end_str, "%d/%m/%Y") - datetime.strptime(od['start_date'], "%d/%m/%Y")).days + 1
+        diff = new_days - old_days
+        diff_txt = f"เพิ่มขึ้น {diff} วัน" if diff > 0 else f"ลดลง {abs(diff)} วัน" if diff < 0 else "จำนวนวันเท่าเดิม"
+
         d[idx]['end_date'] = new_end_str
-        d[idx]['total_days'] = (datetime.strptime(new_end_str, "%d/%m/%Y") - datetime.strptime(od['start_date'], "%d/%m/%Y")).days + 1
+        d[idx]['total_days'] = new_days
         save_json(DB_LEAVE, d)
         await update_summary_board()
+        
         cfg = load_json(CONFIG_PATH, {})
         log_ch_id = cfg.get("log_ch")
         if log_ch_id:
             log_ch = bot.get_channel(int(log_ch_id))
             if log_ch:
-                # แก้ไข Log ให้แสดงรายละเอียดครบถ้วน
                 log_em = discord.Embed(title="📌 บันทึกการแก้ไขวันสิ้นสุดการลา", color=0x95a5a6)
-                log_em.add_field(name="👤 สมาชิกที่ลา", value=f"<@{od['target_id']}>", inline=True)
-                if od['target_id'] != str(it.user.id):
-                    log_em.add_field(name="👮 ผู้แก้ไข", value=it.user.mention, inline=True)
+                on_behalf = f"\n**👮 ผู้แจ้งแก้ไขแทน:** <@{it.user.id}>" if od['target_id'] != str(it.user.id) else ""
                 
-                log_em.add_field(name="📝 ประเภท", value=od.get('leave_category', 'ทั่วไป'), inline=True)
-                log_em.add_field(name="📅 ช่วงเวลาเดิม", value=f"{od['start_date']} - {old_e}", inline=False)
-                log_em.add_field(name="🔹 วันที่สิ้นสุดใหม่", value=f"**{new_end_str}**", inline=True)
-                log_em.add_field(name="💬 เหตุผลเดิมที่แจ้ง", value=od.get('reason', '-'), inline=False)
-                
+                log_em.description = (
+                    f"**👤 สมาชิกที่ลา:** <@{od['target_id']}>{on_behalf}\n\n"
+                    f"**📝 ประเภท:** {od.get('leave_category', 'ทั่วไป')}\n"
+                    f"**📅 วันที่ลาเดิม:** {od['start_date']} - {old_e} `(รวม {old_days} วัน)`\n"
+                    f"**🔹 วันที่ลาใหม่:** {od['start_date']} - {new_end_str} `(รวม {new_days} วัน)`\n"
+                    f"**📈 การเปลี่ยนแปลง:** `{diff_txt}`\n"
+                    f"**💬 เหตุผลเดิมที่แจ้ง:** {od.get('reason', '-')}\n\n"
+                    f"{LONG_SEP}"
+                )
                 log_em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M')} น.")
                 await log_ch.send(embed=log_em)
         
-        await it.edit_original_response(content=f"✅ แก้ไขวันสิ้นสุดของท่านเรียบร้อยแล้ว!", embed=None, view=None)
+        await it.edit_original_response(content=f"✏️ แก้ไขข้อมูลการลาเรียบร้อยแล้ว!", embed=None, view=None)
         await asyncio.sleep(3)
         try: await it.delete_original_response()
         except: pass
@@ -498,17 +510,23 @@ class EditDateModal(discord.ui.Modal):
         val = self.new_e.value.strip()
         if not validate_date(val): return await it.response.send_message("❌ รูปแบบวันที่ผิด!", ephemeral=True)
         
-        # ลบข้อความลับเดิมออกทันที
         if self.parent_it:
             try: await self.parent_it.delete_original_response()
             except: pass
             
-        # แสดง Embed สรุปสีขาวให้ยืนยัน
-        em = discord.Embed(title="⚠️ ยืนยันการแก้ไขวันสิ้นสุดการลา", color=0xffffff)
-        em.add_field(name="👤 สมาชิกที่ลา", value=f"<@{self.od['target_id']}>", inline=True)
-        em.add_field(name="📝 ประเภท", value=self.od.get('leave_category', 'ทั่วไป'), inline=True)
-        em.add_field(name="📅 ช่วงเวลาเดิม", value=f"{self.od['start_date']} - {self.od['end_date']}", inline=False)
-        em.add_field(name="🔹 เปลี่ยนวันสิ้นสุดเป็น", value=f"**{val}**", inline=False)
+        old_days = (datetime.strptime(self.od['end_date'], "%d/%m/%Y") - datetime.strptime(self.od['start_date'], "%d/%m/%Y")).days + 1
+        new_days = (datetime.strptime(val, "%d/%m/%Y") - datetime.strptime(self.od['start_date'], "%d/%m/%Y")).days + 1
+        diff = new_days - old_days
+        diff_txt = f"เพิ่มขึ้น {diff} วัน" if diff > 0 else f"ลดลง {abs(diff)} วัน" if diff < 0 else "จำนวนวันเท่าเดิม"
+
+        em = discord.Embed(title="確認 | ตรวจสอบความถูกต้อง", color=0xffffff)
+        em.description = (
+            f"**👤 สมาชิก:** <@{self.od['target_id']}>\n"
+            f"**📅 วันที่ลาเดิม:** {self.od['start_date']} - {self.od['end_date']} `({old_days} วัน)`\n"
+            f"**🔹 วันที่ลาใหม่:** {self.od['start_date']} - {val} `({new_days} วัน)`\n"
+            f"**📊 การเปลี่ยนแปลง:** `{diff_txt}`\n\n"
+            f"**ยืนยันการแก้ไขข้อมูลหรือไม่?**"
+        )
         await it.response.send_message(embed=em, view=ConfirmEditView(self.idx, self.od, val), ephemeral=True)
 
 class EditDateSelect(discord.ui.Select):
@@ -528,11 +546,19 @@ class EditDateSelect(discord.ui.Select):
             await it.response.send_modal(EditDateModal(self.idx, self.od, self.parent_it))
         else:
             val = self.values[0]
-            em = discord.Embed(title="⚠️ ยืนยันการแก้ไขวันสิ้นสุดการลา", color=0xffffff)
-            em.add_field(name="👤 สมาชิกที่ลา", value=f"<@{self.od['target_id']}>", inline=True)
-            em.add_field(name="📝 ประเภท", value=self.od.get('leave_category', 'ทั่วไป'), inline=True)
-            em.add_field(name="📅 ช่วงเวลาเดิม", value=f"{self.od['start_date']} - {self.od['end_date']}", inline=False)
-            em.add_field(name="🔹 เปลี่ยนวันสิ้นสุดเป็น", value=f"**{val}**", inline=False)
+            old_days = (datetime.strptime(self.od['end_date'], "%d/%m/%Y") - datetime.strptime(self.od['start_date'], "%d/%m/%Y")).days + 1
+            new_days = (datetime.strptime(val, "%d/%m/%Y") - datetime.strptime(self.od['start_date'], "%d/%m/%Y")).days + 1
+            diff = new_days - old_days
+            diff_txt = f"เพิ่มขึ้น {diff} วัน" if diff > 0 else f"ลดลง {abs(diff)} วัน" if diff < 0 else "จำนวนวันเท่าเดิม"
+
+            em = discord.Embed(title="確認 | ตรวจสอบความถูกต้อง", color=0xffffff)
+            em.description = (
+                f"**👤 สมาชิก:** <@{self.od['target_id']}>\n"
+                f"**📅 วันที่ลาเดิม:** {self.od['start_date']} - {self.od['end_date']} `({old_days} วัน)`\n"
+                f"**🔹 วันที่ลาใหม่:** {self.od['start_date']} - {val} `({new_days} วัน)`\n"
+                f"**📊 การเปลี่ยนแปลง:** `{diff_txt}`\n\n"
+                f"**ยืนยันการแก้ไขข้อมูลหรือไม่?**"
+            )
             await it.response.edit_message(content=None, embed=em, view=ConfirmEditView(self.idx, self.od, val))
 
 class EditLeaveSelect(discord.ui.Select):
@@ -644,7 +670,7 @@ class LeaveCategorySelect(discord.ui.Select):
 async def admin(ctx):
     await ctx.send(embed=discord.Embed(title="🕹 Dark Monday Admin Panel"), view=AdminPanelView())
 
-# --- 9. ระบบ Backup (จุดแก้ไข: พาธไฟล์ถูกต้อง) ---
+# --- 9. ระบบ Backup (คงเดิมจากไฟล์ฐาน) ---
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def backup(ctx):
