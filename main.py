@@ -238,7 +238,7 @@ class ConfirmClearView(discord.ui.View):
                     f"**⏰ เวลา:** {get_thai_time().strftime('%H:%M น.')}\n\n"
                     f"**📋 รายละเอียด:**\n- ทำการลบข้อมูลการลาทั้งหมดเรียบร้อยแล้ว\n- ระบบส่งไฟล์ Backup เข้า DM แอดมินทุกคนแล้ว\n\n{LONG_SEP}"
                 )
-                await log_ch.send(l_em)
+                await log_ch.send(embed=l_em)
             
         await it.edit_original_response(content="✅ ล้างข้อมูลสำเร็จและสำรองไฟล์เรียบร้อย!", view=None)
         await asyncio.sleep(3)
@@ -383,7 +383,7 @@ async def daily_report_task():
                     em.description = msg + summary_msg
                 
                 em.set_footer(text=f"บันทึกเมื่อ: {n.strftime('%H:%M')} น.")
-                await ch.send(embed=em)
+                await ch.send(em)
 
     # รายสัปดาห์ ทุกวันจันทร์ 00:10 น. (กรอง Role 2 ชั้น + ชื่อคลีนเพียวๆ)
     if n.weekday() == 0 and n.hour == 0 and n.minute == 10:
@@ -517,8 +517,8 @@ class CancelSelect(discord.ui.Select):
             txt = f"⚠️ **แน่ใจหรือไม่ที่จะยกเลิกการลานี้?**\n👤 **คนลา:** <@{od['target_id']}>\n📝 **ประเภท:** `{od.get('leave_category','ทั่วไป')}`\n📅 **วันที่:** {dr} `({od.get('total_days', 1)} วัน)`"
             await it.edit_original_response(content=txt, view=ConfirmCancelView(idx, od))
 
-# --- 7. ระบบแก้ไขวันสิ้นสุด (เอาตัวเลือกพิมพ์วันที่เองออก และจำกัด 15 วัน) ---
-async def process_edit_leave(it, idx, od, new_end_str):
+# --- 7. ระบบแก้ไขวันสิ้นสุด (ปรับตามสั่ง: ตัดพิมพ์เอง / หัวข้อใหม่ / อีโมจิปฏิทิน / Modal เหตุผล) ---
+async def process_edit_leave(it, idx, od, new_end_str, edit_reason="-"):
     d = load_json(DB_LEAVE, [])
     old_e = od['end_date']
     if 0 <= idx < len(d):
@@ -544,9 +544,10 @@ async def process_edit_leave(it, idx, od, new_end_str):
                     f"**👤 สมาชิกที่ลา:** <@{od['target_id']}>{on_behalf}\n\n"
                     f"**📝 ประเภท:** {od.get('leave_category', 'ทั่วไป')}\n"
                     f"**📅 วันที่ลาเดิม:** {od['start_date']} - {old_e} `(รวม {old_days} วัน)`\n"
-                    f"**🔹 วันที่ลาใหม่:** {od['start_date']} - {new_end_str} `(รวม {new_days} วัน)`\n"
+                    f"**📅 วันที่ลาใหม่:** {od['start_date']} - {new_end_str} `(รวม {new_days} วัน)`\n"
                     f"**📈 การเปลี่ยนแปลง:** `{diff_txt}`\n"
-                    f"**💬 เหตุผลเดิมที่แจ้ง:** {od.get('reason', '-')}\n\n"
+                    f"**💬 เหตุผลเดิมที่แจ้ง:** {od.get('reason', '-')}\n"
+                    f"**🛑 เหตุผลที่ขอแก้ไข:** {edit_reason}\n\n"
                     f"{LONG_SEP}"
                 )
                 log_em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M')} น.")
@@ -558,6 +559,16 @@ async def process_edit_leave(it, idx, od, new_end_str):
             await it.delete_original_response()
         except:
             pass
+
+class EditReasonModal(discord.ui.Modal):
+    def __init__(self, idx, od, new_end):
+        super().__init__(title="ระบุเหตุผลการแก้ไขวันลา")
+        self.idx, self.od, self.new_end = idx, od, new_end
+        self.reason = discord.ui.TextInput(label='เหตุผลที่ขอแก้ไข', placeholder='ระบุรายละเอียด...', style=discord.TextStyle.paragraph, required=True)
+        self.add_item(self.reason)
+    async def on_submit(self, it: discord.Interaction):
+        await it.response.defer(ephemeral=True)
+        await process_edit_leave(it, self.idx, self.od, self.new_end, self.reason.value)
 
 class EditRetryView(discord.ui.View):
     def __init__(self, idx, od, p_it):
@@ -594,11 +605,11 @@ class EditDateModal(discord.ui.Modal):
         old_days = (datetime.strptime(self.od['end_date'], "%d/%m/%Y") - s_dt).days + 1
         diff = new_days - old_days
         diff_txt = f"เพิ่มขึ้น {diff} วัน" if diff > 0 else f"ลดลง {abs(diff)} วัน" if diff < 0 else "จำนวนวันเท่าเดิม"
-        em = discord.Embed(title="確認 | ตรวจสอบความถูกต้อง", color=0xffffff)
+        em = discord.Embed(title="ตรวจสอบความถูกต้องก่อนยืนยัน", color=0xffffff)
         em.description = (
             f"**👤 สมาชิก:** <@{self.od['target_id']}>\n"
             f"**📅 วันที่ลาเดิม:** {self.od['start_date']} - {self.od['end_date']} `({old_days} วัน)`\n"
-            f"**🔹 วันที่ลาใหม่:** {self.od['start_date']} - {val} `({new_days} วัน)`\n"
+            f"**📅 วันที่ลาใหม่:** {self.od['start_date']} - {val} `({new_days} วัน)`\n"
             f"**📊 การเปลี่ยนแปลง:** `{diff_txt}`\n\n"
             f"**ยืนยันการแก้ไขข้อมูลหรือไม่?**"
         )
@@ -610,8 +621,8 @@ class ConfirmEditView(discord.ui.View):
         self.idx, self.od, self.new_end = idx, od, new_end
     @discord.ui.button(label="✅ ยืนยันการแก้ไข", style=discord.ButtonStyle.success)
     async def confirm(self, it, b):
-        await it.response.defer(ephemeral=True)
-        await process_edit_leave(it, self.idx, self.od, self.new_end)
+        # เรียก Modal เพื่อขอเหตุผลก่อนบันทึก
+        await it.response.send_modal(EditReasonModal(self.idx, self.od, self.new_end))
     @discord.ui.button(label="📅 เลือกวันใหม่", style=discord.ButtonStyle.primary)
     async def reselect(self, it, b):
         await it.response.edit_message(content="📅 **กรุณาเลือกวันที่สิ้นสุดใหม่อีกครั้ง:**", embed=None, view=SubMenuView(it, EditDateSelect(self.idx, self.od, it)))
@@ -628,14 +639,10 @@ class EditDateSelect(discord.ui.Select):
         self.idx, self.od, self.parent_it = idx, od, parent_it
         s_dt = datetime.strptime(od['start_date'], "%d/%m/%Y")
         opts = []
-        # ปรับแก้ไข: ให้เลือกได้ 15 วันนับจากวันเริ่มลา (ไม่เกินกฎ 15 วัน)
         for i in range(15):
             d_str = (s_dt + timedelta(days=i)).strftime("%d/%m/%Y")
             opts.append(discord.SelectOption(label=d_str, value=d_str))
-        
-        # เอาส่วน "ระบุวันที่เอง" ออกตามตกลง
         super().__init__(placeholder="📅 เลือกวันที่กลับมาจริง...", options=opts)
-    
     async def callback(self, it: discord.Interaction):
         val = self.values[0]
         s_dt = datetime.strptime(self.od['start_date'], "%d/%m/%Y")
@@ -645,11 +652,11 @@ class EditDateSelect(discord.ui.Select):
         diff = new_days - old_days
         diff_txt = f"เพิ่มขึ้น {diff} วัน" if diff > 0 else f"ลดลง {abs(diff)} วัน" if diff < 0 else "จำนวนวันเท่าเดิม"
 
-        em = discord.Embed(title="確認 | ตรวจสอบความถูกต้อง", color=0xffffff)
+        em = discord.Embed(title="ตรวจสอบความถูกต้องก่อนยืนยัน", color=0xffffff)
         em.description = (
             f"**👤 สมาชิก:** <@{self.od['target_id']}>\n"
             f"**📅 วันที่ลาเดิม:** {self.od['start_date']} - {self.od['end_date']} `({old_days} วัน)`\n"
-            f"**🔹 วันที่ลาใหม่:** {self.od['start_date']} - {val} `({new_days} วัน)`\n"
+            f"**📅 วันที่ลาใหม่:** {self.od['start_date']} - {val} `({new_days} วัน)`\n"
             f"**📊 การเปลี่ยนแปลง:** `{diff_txt}`\n\n"
             f"**ยืนยันการแก้ไขข้อมูลหรือไม่?**"
         )
@@ -681,7 +688,6 @@ class LeaveMainView(discord.ui.View):
     async def l_cn(self, it, b):
         d = load_json(DB_LEAVE, [])
         u_id, now_date, opts = str(it.user.id), get_thai_time().date(), []
-        # กฎข้อที่ 10: สิทธิ์แอดมินสามารถเห็นและยกเลิกของทุกคนได้
         is_admin = any(r.name in ["Admin", "ผู้ดูแล"] for r in it.user.roles)
         
         for i, e in enumerate(d):
@@ -754,7 +760,7 @@ class DateSelect(discord.ui.Select):
         if val == "t": title, s, e, is_fixed = "ลาวันนี้", now.strftime("%d/%m/%Y"), now.strftime("%d/%m/%Y"), True
         elif val == "tm": title, s, e, is_fixed = "ลาพรุ่งนี้", (now + timedelta(days=1)).strftime("%d/%m/%Y"), (now + timedelta(days=1)).strftime("%d/%m/%Y"), True
         else: title, s, e, is_fixed = "ลาแบบระบุวันเอง", "", "", False
-        await it.response.edit_message(content=f"✅ เลือกช่วงเวลา: **{title}**\n👉 กรุณาเลือกประเภทการลาด้านล่าง:", view=SubMenuView(it, LeaveCategorySelect(title, s, e, self.t_id, is_fixed)))
+        await it.response.edit_message(content=f"✅ เลือกช่วงเวลา: **{title}**\n👉 กรุณาเลือกประเภทการลาด้านล่าง:", view=SubMenuView(it, LeaveCategorySelect(title, s, e, self.t_id, is_f=is_fixed)))
 
 class LeaveCategorySelect(discord.ui.Select):
     def __init__(self, m_title, s_v, e_v, t_id=None, is_f=False):
