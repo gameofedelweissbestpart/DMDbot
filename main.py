@@ -347,7 +347,7 @@ class AdminPanelView(discord.ui.View):
 async def daily_report_task():
     n = get_thai_time()
     # รายวัน 00:05 น.
-    if n.hour == 4 and n.minute == 25:
+    if n.hour == 0 and n.minute == 5:
         cfg = load_json(CONFIG_PATH, {})
         ch_id = cfg.get("daily_ch", 0)
         if ch_id:
