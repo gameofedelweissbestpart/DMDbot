@@ -313,7 +313,7 @@ class AdminPanelView(discord.ui.View):
             discord.SelectOption(label="📋 ตาราง Real-time", value="realtime_ch"),
             discord.SelectOption(label="📌 Log แจ้งลา", value="log_ch"),
             discord.SelectOption(label="📊 ประวัติรายวัน", value="daily_ch"),
-            discord.SelectOption(label="📊 สรุปประวัติรายสัปดาห์", value="weekly_ch")
+            discord.SelectOption(label="📊 สรุปประวัติรายสัปดาห์", value="weekly_ch"),
             discord.SelectOption(label="💰 ห้องแจ้งยอดค่าปรับ", value="fine_ch"),
             discord.SelectOption(label="🧾 ห้องตรวจสลิป/ใบเสร็จ", value="payment_log_ch")
         ]
@@ -1138,6 +1138,8 @@ class AttendanceView(discord.ui.View):
 @bot.event
 async def on_ready():
     bot.add_view(LeaveMainView())
+    bot.add_view(MemberPaymentView())        # เพิ่มบรรทัดนี้
+    bot.add_view(AdminVerifyView(None, None)) # เพิ่มบรรทัดนี้
     print('Bot DMD Online | System Year: 2026')
     if not daily_report_task.is_running(): daily_report_task.start()
     if not weekly_report_task.is_running():
