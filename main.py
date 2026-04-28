@@ -845,6 +845,7 @@ class LeaveCategorySelect(discord.ui.Select):
 async def admin(ctx):
     await ctx.send(embed=discord.Embed(title="🕹 Dark Monday Admin Panel"), view=AdminPanelView())
 
+
 # --- 9. ระบบ Backup (ส่งข้อมูล 2 ไฟล์ให้แอดมินทุกคน) ---
 @bot.command()
 @commands.has_any_role("Admin", "ผู้ดูแล")
@@ -862,6 +863,7 @@ async def backup(ctx):
             except:
                 continue
     await ctx.send(f"✅ ส่งไฟล์ Backup เข้า DM ของแอดมินทั้งหมด {count} ท่านเรียบร้อยแล้ว")
+
 
 @bot.event
 async def on_ready():
