@@ -336,19 +336,6 @@ async def daily_report_task():
             if ch:
                 d = load_json(DB_LEAVE, [])
                 nd = n.date()
-                
-                # --- AUTO CLEANUP: ลบข้อมูลที่สิ้นสุดการลาเกิน 30 วัน ---
-                cutoff = nd - timedelta(days=30)
-                cleaned_data = []
-                for e in d:
-                    try:
-                        e_dt = datetime.strptime(e['end_date'], "%d/%m/%Y").date()
-                        if e_dt >= cutoff: cleaned_data.append(e)
-                    except: cleaned_data.append(e)
-                if len(cleaned_data) != len(d):
-                    save_json(DB_LEAVE, cleaned_data)
-                    d = cleaned_data
-
                 ac = []
                 counts = {}
                 for e in d:
@@ -359,89 +346,153 @@ async def daily_report_task():
                             ac.append(e)
                             cat = e.get('leave_category', 'ทั่วไป')
                             counts[cat] = counts.get(cat, 0) + 1
-                    except: continue
+                    except:
+                        continue
                 
-                em = discord.Embed(title=f"📊 สรุปประวัติการลาของวันที่ {n.strftime('%d/%m/%Y')}", color=0x9b59b6)
+                # --- ส่วนที่ปรับปรุงดีไซน์ตามที่คุณสั่ง ---
+                separator = "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"
+                
+                em = discord.Embed(
+                    title=f"📅 รายงานสรุปการลาประจำวัน",
+                    description=f"**วันที่ {n.strftime('%d/%m/%Y')}**\n{separator}",
+                    color=0x9b59b6 if ac else 0x2ecc71
+                )
+
                 if not ac:
-                    em.description = "✅ **วันนี้สมาชิกแก๊ง DMD ทุกคนพร้อมรัน (ไม่มีใครลา)**\n\n**👥 รวมสมาชิกที่ลาทั้งหมด:   0 คน**\n\u200b"
+                    em.description += f"\n\n✨ **วันนี้สมาชิก DMD ทุกคนอยู่ครบ!**\n✅ พร้อมรันทุกกิจกรรม ไม่มีใครแจ้งลา\n\n{separator}"
                 else:
                     msg = ""
                     for i in ac:
                         tg = bot.get_user(int(i['target_id']))
                         tn = tg.display_name if tg else f"ID: {i['target_id']}"
-                        msg += f"📍 **{tn}** `[{i.get('leave_category','ทั่วไป')}]` | {i['reason']}"
+                        cat = i.get('leave_category', 'ทั่วไป')
+                        
+                        # แสดงผล: 👤 ชื่อ — [ประเภท]
+                        msg += f"👤 **{tn}** — ` {cat} `\n"
+                        # แสดงผล: ┗ 💬 เหตุผล
+                        msg += f"┗ 💬 {i['reason']}"
+                        
                         if i['user_id'] != i['target_id']:
                             su = bot.get_user(int(i['user_id']))
-                            sn = su.display_name if su else f"ID: {i['user_id']}"
-                            msg += f" **(แจ้งแทนโดย: {sn})**"
-                        msg += "\n"
+                            sn = su.name if su else f"ID: {i['user_id']}"
+                            msg += f" *(โดย: @{sn})*"
+                        msg += "\n\n"
                     
-                    summary_msg = "\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n**📊 สรุปยอดรวม:**\n"
+                    # รายชื่อคนลา
+                    em.add_field(name="\u200b", value=msg, inline=False)
+                    
+                    # ส่วนสรุปยอดรวม (อยู่ล่างเส้นคั่น)
+                    summary_msg = f"{separator}\n"
+                    summary_msg += f"📊 **สรุปยอดรวมทั้งหมด: {len(ac)} คน**\n"
                     for cat_name, count in counts.items():
-                        summary_msg += f"• {cat_name} : {count} คน\n"
-                    summary_msg += f"**👥 รวมสมาชิกที่ลาทั้งหมด {len(ac)} คน**\n\u200b"
-                    em.description = msg + summary_msg
-                
-                em.set_footer(text=f"บันทึกเมื่อ: {n.strftime('%H:%M')} น.")
-                await ch.send(em)
+                        summary_msg += f"• {cat_name}: `{count}` คน\n"
+                    
+                    em.add_field(name="\u200b", value=summary_msg, inline=False)
 
-    # รายสัปดาห์ ทุกวันจันทร์ 00:10 น. (กรอง Role 2 ชั้น + ชื่อคลีนเพียวๆ)
+                em.set_footer(text=f"ระบบรายงานอัตโนมัติ • {n.strftime('%H:%M')} น.")
+                await ch.send(embed=em)
+
+    # --- ฟังก์ชันสรุปรายสัปดาห์ (วางต่อจาก daily_report_task หรือก่อน bot.run) ---
+@tasks.loop(minutes=1)
+async def weekly_report_task():
+    n = get_thai_time()
+    
+    # ตั้งค่าให้ส่งทุกวันจันทร์ (weekday == 0) เวลา 00:10 น.
     if n.weekday() == 0 and n.hour == 0 and n.minute == 10:
         cfg = load_json(CONFIG_PATH, {})
-        w_ch_id = cfg.get("weekly_ch")
-        if w_ch_id:
-            w_ch = bot.get_channel(int(w_ch_id))
-            if w_ch:
-                guild = w_ch.guild
+        ch_id = cfg.get("daily_ch", 0) # ใช้ช่องเดียวกับสรุปรายวัน หรือเปลี่ยนตามต้องการ
+        
+        if ch_id:
+            ch = bot.get_channel(int(ch_id))
+            guild = ch.guild if ch else None
+            if ch and guild:
+                # 1. ดึงข้อมูลและกำหนดช่วงวันที่ (ย้อนหลัง 7 วัน)
+                all_data = load_json(DB_LEAVE, [])
+                start_week = (n - timedelta(days=7)).date()
+                end_week = (n - timedelta(days=1)).date()
+                
+                # 2. กรองสมาชิกตาม Role
                 target_role_id = 1456228588968739028
                 exclude_role_id = 1498319593939144755
                 
-                valid_members = [m for m in guild.members if any(r.id == target_role_id for r in m.roles) and not any(r.id == exclude_role_id for r in m.roles)]
-                
-                d = load_json(DB_LEAVE, [])
-                end_range = n.date() - timedelta(days=1)
-                start_range = end_range - timedelta(days=6)
-                
-                user_stats = {}
-                for m in valid_members:
-                    user_stats[str(m.id)] = {'leaves': 0, 'days': 0, 'member': m}
+                gang_members = []
+                for m in guild.members:
+                    has_target = any(r.id == target_role_id for r in m.roles)
+                    has_exclude = any(r.id == exclude_role_id for r in m.roles)
+                    if has_target and not has_exclude:
+                        gang_members.append(m)
 
-                for e in d:
-                    t_id = e['target_id']
-                    if t_id in user_stats:
-                        try:
-                            s_d = datetime.strptime(e['start_date'], "%d/%m/%Y").date()
-                            e_d = datetime.strptime(e['end_date'], "%d/%m/%Y").date()
-                            overlap_start = max(s_d, start_range)
-                            overlap_end = min(e_d, end_range)
-                            if overlap_start <= overlap_end:
-                                days = (overlap_end - overlap_start).days + 1
-                                user_stats[t_id]['leaves'] += 1
-                                user_stats[t_id]['days'] += days
-                        except: continue
+                # 3. คำนวณการลา
+                leave_stats = {} # {user_id: count}
+                cat_counts = {}  # {category: count}
+                for entry in all_data:
+                    try:
+                        s_d = datetime.strptime(entry['start_date'], "%d/%m/%Y").date()
+                        e_d = datetime.strptime(entry['end_date'], "%d/%m/%Y").date()
+                        # เช็คว่าช่วงที่ลา คาบเกี่ยวกับสัปดาห์ที่ผ่านมาหรือไม่
+                        if not (e_d < start_week or s_d > end_week):
+                            uid = entry['target_id']
+                            # นับจำนวนวันลาที่อยู่ในสัปดาห์นี้
+                            overlap_s = max(s_d, start_week)
+                            overlap_e = min(e_d, end_week)
+                            days = (overlap_e - overlap_s).days + 1
+                            
+                            leave_stats[uid] = leave_stats.get(uid, 0) + days
+                            cat = entry.get('leave_category', 'ทั่วไป')
+                            cat_counts[cat] = cat_counts.get(cat, 0) + 1
+                    except: continue
 
-                em = discord.Embed(title="📊 สรุปรายชื่อการแจ้งลาประจำสัปดาห์", color=0x2b2d31)
-                left_list = [v for k, v in user_stats.items() if v['leaves'] > 0]
-                ready_list = [v for k, v in user_stats.items() if v['leaves'] == 0]
-                
-                msg_left = "```\n"
-                if not left_list: msg_left += "ไม่มีรายชื่อ\n"
-                else:
-                    for s in sorted(left_list, key=lambda x: x['leaves'], reverse=True):
-                        msg_left += f"{s['member'].display_name}\n"
-                msg_left += "```"
+                # 4. แยกกลุ่มสมาชิก
+                away_list = []
+                active_list = []
+                for m in gang_members:
+                    uid_str = str(m.id)
+                    if uid_str in leave_stats:
+                        away_list.append(f"👤 **{m.display_name}** — `{leave_stats[uid_str]}` วัน")
+                    else:
+                        active_list.append(f"👤 **{m.display_name}**")
 
-                msg_ready = "```\n"
-                if not ready_list: msg_ready += "ไม่มีรายชื่อ\n"
-                else:
-                    for s in ready_list:
-                        msg_ready += f"{s['member'].display_name}\n"
-                msg_ready += "```"
+                # 5. สร้าง Embed
+                separator = "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"
+                em = discord.Embed(
+                    title="📊 รายงานสรุปการลาประจำสัปดาห์",
+                    description=f"**ช่วงวันที่ {start_week.strftime('%d/%m/%Y')} - {end_week.strftime('%d/%m/%Y')}**\n{separator}",
+                    color=0x3498db
+                )
+
+                # รายชื่อคนลา
+                away_text = "\n".join(away_list) if away_list else "ไม่มีสมาชิกแจ้งลา"
+                em.add_field(name=f"❌ สมาชิกที่แจ้งลา (สัปดาห์นี้)", value=f"{away_text}\n*(รวม: {len(away_list)} คน)*", inline=False)
+
+                # รายชื่อคน Active (เรียงลงล่าง)
+                # หมายเหตุ: หากชื่อยาวเกิน 1024 ตัวอักษร Discord จะตัดทิ้ง ในกรณีสมาชิก 30 คนมักจะไม่มีปัญหา
+                active_text = "\n".join(active_list) if active_list else "ไม่มีสมาชิก Active"
+                em.add_field(name=f"✅ สมาชิกที่ไม่ได้ลาเลย (Active)", value=f"{active_text}\n*(รวม: {len(active_list)} คน)*", inline=False)
+
+                # สรุปท้าย
+                total_m = len(gang_members)
+                active_percent = (len(active_list) / total_m * 100) if total_m > 0 else 0
                 
-                em.add_field(name="✅ สมาชิกที่แจ้งลา", value=msg_left, inline=False)
-                em.add_field(name="❌ สมาชิกที่ไม่ได้แจ้งลา", value=msg_ready, inline=False)
-                em.set_footer(text=f"บันทึกเมื่อ: {n.strftime('%d/%m/%Y %H:%M น.')}")
-                await w_ch.send(embed=em)
+                summary_msg = f"{separator}\n📊 **สรุปยอดรวมทั้งหมด: {total_m} คน**\n"
+                for c_name, c_num in cat_counts.items():
+                    summary_msg += f"• {c_name}: `{c_num}` ครั้ง\n"
+                
+                # สถิติและ % ความแอคทีฟ
+                if cat_counts:
+                    top_cat = max(cat_counts, key=cat_counts.get)
+                    summary_msg += f"\n📈 **สถิติ:** สัปดาห์นี้สมาชิกลา **\"{top_cat}\"** มากที่สุด"
+                
+                summary_msg += f"\n✨ **ความแอคทีฟสัปดาห์นี้: {active_percent:.1f}%**"
+                
+                em.add_field(name="\u200b", value=summary_msg, inline=False)
+                em.set_footer(text=f"ระบบรายงานอัตโนมัติ • {n.strftime('%d/%m/%Y %H:%M น.')}")
+
+                await ch.send(embed=em)
+
+# --- อย่าลืมเพิ่มการสั่งรัน Task ใน on_ready ---
+# ในฟังก์ชัน on_ready() ของคุณ ให้เพิ่มบรรทัดนี้:
+# if not weekly_report_task.is_running():
+#     weekly_report_task.start()
 
 # --- 6. ระบบยกเลิกใบลา (ปรับหัวข้อ Log และลบบรรทัดสถานะออก) ---
 class CancelReasonModal(discord.ui.Modal):
@@ -802,5 +853,7 @@ async def on_ready():
     bot.add_view(LeaveMainView())
     print('Bot DMD Online | System Year: 2026')
     if not daily_report_task.is_running(): daily_report_task.start()
+    if not weekly_report_task.is_running():
+        weekly_report_task.start()
 
 bot.run(TOKEN)
