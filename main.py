@@ -48,11 +48,13 @@ class RealtimeRefreshView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="🔄 อัปเดตรายชื่อ", style=discord.ButtonStyle.secondary, custom_id="refresh_realtime_board")
+    @discord.ui.button(label="🔄 อัปเดตรายชื่อ", style=discord.ButtonStyle.success, custom_id="refresh_realtime_board")
     async def refresh_board(self, it: discord.Interaction, b: discord.ui.Button):
-        await it.response.defer(ephemeral=True)
+        await it.response.defer(ephemeral=True) # 1. จองคิวการตอบกลับแบบเห็นคนเดียว
         await update_summary_board() # เรียกตัวเองเพื่ออัปเดตข้อมูล
-        await it.followup.send("✅ อัปเดตข้อมูลรายชื่อล่าสุดเรียบร้อยแล้ว!", ephemeral=True)        
+        await it.edit_original_response(content="✅ อัปเดตข้อมูลบนบอร์ดให้เป็นล่าสุดเรียบร้อยแล้ว!")
+        await asyncio.sleep(3) # รอ 3 วินาทีแล้วสั่งทำลายข้อความลับนั้นทิ้ง
+        await it.delete_original_response()
 
 # --- 2. ระบบตาราง Real-time (ปรับหัวข้อตามสั่ง) ---
 async def update_summary_board():
