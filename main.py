@@ -314,6 +314,8 @@ class AdminPanelView(discord.ui.View):
             discord.SelectOption(label="📌 Log แจ้งลา", value="log_ch"),
             discord.SelectOption(label="📊 ประวัติรายวัน", value="daily_ch"),
             discord.SelectOption(label="📊 สรุปประวัติรายสัปดาห์", value="weekly_ch")
+            discord.SelectOption(label="💰 ห้องแจ้งยอดค่าปรับ", value="fine_ch"),
+            discord.SelectOption(label="🧾 ห้องตรวจสลิป/ใบเสร็จ", value="payment_log_ch")
         ]
         await it.response.send_message("🛠 เลือกหัวข้อที่ต้องการตั้งค่า:", view=SubMenuView(it, AdminCatSelect(opts)), ephemeral=True)
     
@@ -322,6 +324,19 @@ class AdminPanelView(discord.ui.View):
     async def clear_all(self, it, b):
         txt = "⚠️ **คุณยืนยันที่จะล้างข้อมูลใบลาทั้งหมดใช่หรือไม่?**\nการกระทำนี้จะลบข้อมูลถาวรและส่งไฟล์ Backup ให้แอดมินทุกคน"
         await it.response.send_message(content=txt, view=ConfirmClearView(), ephemeral=True)
+
+    @discord.ui.button(label="💰 จัดการเช็กชื่อ & ค่าปรับ", style=discord.ButtonStyle.success)
+    async def manage_fines(self, it, b):
+        members = get_gang_members(it.guild)
+        if not members: 
+            return await it.response.send_message("❌ ไม่พบสมาชิกมียศที่กำหนด (ID: 1456228588968739028)", ephemeral=True)
+        
+        # ส่งข้อความใหม่ที่มี Dropdown เลือกชื่อสมาชิก 30 คน และปุ่มกิจกรรม
+        await it.response.send_message(
+            "🛠 **เมนูแอดมิน:** เลือกสมาชิกเพื่อเช็กชื่อกิจกรรม (หลังเที่ยงคืน)", 
+            view=AttendanceView(members), 
+            ephemeral=True
+        )
 
 # --- 5. งานรายวัน และ รายสัปดาห์ (Auto Cleanup 30 วัน + รายสัปดาห์คลีน) ---
 @tasks.loop(minutes=1)
@@ -855,5 +870,161 @@ async def on_ready():
     if not daily_report_task.is_running(): daily_report_task.start()
     if not weekly_report_task.is_running():
         weekly_report_task.start()
+
+# --- ส่วนที่เพิ่มใหม่: ระบบจัดการค่าปรับและอนุมัติหลักฐาน (DMD) ---
+
+class RejectReasonModal(discord.ui.Modal, title='ระบุเหตุผลการปฏิเสธ'):
+    reason = discord.ui.TextInput(label='เหตุผลที่ไม่ผ่าน', placeholder='เช่น รูปไม่ชัดเจน, ยอดเงินไม่ครบ...', style=discord.TextStyle.paragraph, required=True)
+    def __init__(self, target_member, admin_name):
+        super().__init__()
+        self.target_member = target_member
+        self.admin_name = admin_name
+
+    async def on_submit(self, it: discord.Interaction):
+        await it.response.defer(ephemeral=True)
+        try:
+            msg = f"⚠️ **การแจ้งชำระค่าปรับของคุณไม่ผ่าน**\n**เหตุผล:** {self.reason.value}\n**โดยแอดมิน:** {self.admin_name}\n📌 กรุณาตรวจสอบและส่งหลักฐานใหม่อีกครั้งครับ"
+            await self.target_member.send(msg)
+            await it.followup.send(f"✅ ส่งเหตุผลปฏิเสธให้ {self.target_member.display_name} เรียบร้อยแล้ว", ephemeral=True)
+        except:
+            await it.followup.send(f"❌ ไม่สามารถส่ง DM หา {self.target_member.display_name} ได้ (สมาชิกปิด DM)", ephemeral=True)
+
+class AdminVerifyView(discord.ui.View):
+    def __init__(self, member_id, amount):
+        super().__init__(timeout=None)
+        self.member_id = member_id
+        self.amount = amount
+
+    @discord.ui.button(label="✅ อนุมัติ", style=discord.ButtonStyle.success)
+    async def approve(self, it: discord.Interaction, b):
+        await it.response.defer(ephemeral=True)
+        f_data = load_fines()
+        uid = str(self.member_id)
+        if uid in f_data["unpaid_fines"]:
+            del f_data["unpaid_fines"][uid] # ล้างหนี้สะสมแบบ ข
+            f_data["payment_history"].append({
+                "user_id": uid, "amount": self.amount, "admin": it.user.display_name, "date": get_thai_time().strftime("%d/%m/%Y %H:%M")
+            })
+            save_fines(f_data)
+            
+            # ส่งใบเสร็จแยกห้อง
+            conf = load_json(CONFIG_PATH, {})
+            log_ch = bot.get_channel(int(conf.get('payment_log_ch', 0)))
+            if log_ch:
+                res_em = discord.Embed(title="🧾 ใบเสร็จรับเงินค่าปรับ", color=0x2ecc71, timestamp=get_thai_time())
+                res_em.description = f"👤 **ผู้ชำระ:** <@{uid}>\n💰 **จำนวน:** จ่ายยอดเต็มเรียบร้อย\n👮 **แอดมินผู้อนุมัติ:** {it.user.mention}"
+                await log_ch.send(embed=res_em)
+            
+            await it.edit_original_response(content="✅ อนุมัติและล้างหนี้เรียบร้อย!", view=None)
+
+    @discord.ui.button(label="❌ ปฏิเสธ", style=discord.ButtonStyle.danger)
+    async def reject(self, it: discord.Interaction, b):
+        target = it.guild.get_member(int(self.member_id))
+        await it.response.send_modal(RejectReasonModal(target, it.user.display_name))
+
+# --- เพิ่มตัวเลือกในเมนูตั้งค่าเดิม ---
+# (หมายเหตุ: ให้คุณไปแก้ใน Class AdminPanelView ตามที่ผมแนะนำก่อนหน้านี้ด้วยนะครับ)
+
+@bot.command()
+@commands.has_any_role("Admin", "ผู้ดูแล")
+async def check_names(ctx):
+    """คำสั่งสำหรับแอดมินรวบยอดเช็กชื่อหลังเที่ยงคืน"""
+    members = get_gang_members(ctx.guild)
+    if not members: return await ctx.send("❌ ไม่พบสมาชิกที่มียศตามเงื่อนไข")
+    # (ส่วนโค้ด Dropdown 30 คนจะถูกเรียกใช้งานที่นี่)
+    await ctx.send("📋 **ระบบเช็กชื่อกิจกรรม (หลังเที่ยงคืน)**\nกรุณาเลือกชื่อสมาชิกจากเมนู...", ephemeral=True)
+
+# ==========================================
+# ส่วนที่เพิ่มใหม่: ระบบเช็กชื่อรวบยอด และจัดการค่าปรับ (DMD)
+# ==========================================
+
+class AttendanceMemberSelect(discord.ui.Select):
+    def __init__(self, members):
+        options = [discord.SelectOption(label=m.display_name, value=str(m.id)) for m in members]
+        super().__init__(placeholder="🔍 เลือกสมาชิกที่ต้องการเช็กชื่อ...", options=options)
+
+    async def callback(self, it: discord.Interaction):
+        view: AttendanceView = self.view
+        view.selected_id = int(self.values[0])
+        await view.update_message(it)
+
+class AttendanceView(discord.ui.View):
+    def __init__(self, members):
+        super().__init__(timeout=None)
+        self.members = members
+        self.selected_id = None
+        self.results = {} # {member_id: [list of failed activities]}
+        self.add_item(AttendanceMemberSelect(members))
+
+    async def update_message(self, it: discord.Interaction):
+        m = it.guild.get_member(self.selected_id)
+        embed = discord.Embed(title="📝 ระบบเช็กชื่อกิจกรรม (หลังเที่ยงคืน)", color=0xf1c40f)
+        embed.add_field(name="สมาชิกที่เลือก", value=m.mention if m else "ยังไม่ได้เลือก", inline=False)
+        
+        # แสดงสถานะการลา (ดึงจากระบบเดิมของคุณ)
+        leave_info = "ไม่มีใบลา"
+        leaves = load_json(DB_LEAVE, [])
+        now_str = get_thai_time().strftime("%d/%m/%Y")
+        for l in leaves:
+            if str(l.get('t_id')) == str(self.selected_id):
+                if l['s_v'] <= now_str <= l['e_v']:
+                    leave_info = f"⚠️ {l['type']} (เหตุผล: {l['re']})"
+                    break
+        
+        embed.add_field(name="สถานะการลาวันนี้", value=leave_info, inline=False)
+        embed.set_footer(text="ติ๊กกิจกรรมที่สมาชิก 'ขาด' (ปุ่มแดง = ปรับเงิน)")
+        
+        await it.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="แอร์ดรอป 21:00", style=discord.ButtonStyle.secondary)
+    async def act1(self, it, b): await self.toggle(it, b, "แอร์ดรอป 21:00")
+    @discord.ui.button(label="อีเธอร์", style=discord.ButtonStyle.secondary)
+    async def act2(self, it, b): await self.toggle(it, b, "อีเธอร์")
+    @discord.ui.button(label="สกายฟอล", style=discord.ButtonStyle.secondary)
+    async def act3(self, it, b): await self.toggle(it, b, "สกายฟอล")
+    @discord.ui.button(label="แอร์ดรอป 00:00", style=discord.ButtonStyle.secondary)
+    async def act4(self, it, b): await self.toggle(it, b, "แอร์ดรอป 00:00")
+
+    async def toggle(self, it, b, name):
+        if not self.selected_id: return await it.response.send_message("❌ กรุณาเลือกสมาชิกก่อน!", ephemeral=True)
+        if self.selected_id not in self.results: self.results[self.selected_id] = set()
+        if name in self.results[self.selected_id]:
+            self.results[self.selected_id].remove(name)
+            b.style = discord.ButtonStyle.secondary
+        else:
+            self.results[self.selected_id].add(name)
+            b.style = discord.ButtonStyle.danger
+        await it.response.edit_message(view=self)
+
+    @discord.ui.button(label="💾 บันทึกและแจ้งยอด", style=discord.ButtonStyle.success, row=4)
+    async def save_all(self, it, b):
+        conf = load_json(CONFIG_PATH, {})
+        ch_id = conf.get('fine_ch')
+        if not ch_id: return await it.response.send_message("❌ ยังไม่ตั้งค่าห้องแจ้งยอดค่าปรับ!", ephemeral=True)
+        
+        ch = bot.get_channel(int(ch_id))
+        f_data = load_fines()
+        
+        summary_msg = "🔔 **สรุปยอดค่าปรับกิจกรรมรายวัน**\n"
+        for mid, acts in self.results.items():
+            count = len(acts)
+            if count == 0: continue
+            fine = 500000 if count == 4 else count * 200000
+            f_data["unpaid_fines"][str(mid)] = f_data["unpaid_fines"].get(str(mid), 0) + fine
+            summary_msg += f"- <@{mid}> ขาด {count} กิจกรรม ปรับ **{fine:,} WD** (ยอดสะสม: {f_data['unpaid_fines'][str(mid)]:,} WD)\n"
+        
+        save_fines(f_data)
+        view = MemberPaymentView() # ปุ่มแจ้งจ่ายที่สมาชิกจะเห็น
+        await ch.send(summary_msg, view=view)
+        await it.response.send_message("✅ บันทึกและส่งยอดเข้าห้องค่าปรับเรียบร้อย!", ephemeral=True)
+
+# --- เพิ่มปุ่มใน AdminPanelView เดิม ---
+# ให้คุณมองหา class AdminPanelView: ในไฟล์ของคุณ แล้วเพิ่มปุ่มนี้เข้าไปต่อจากปุ่ม set_l
+
+    @discord.ui.button(label="💰 จัดการเช็กชื่อ & ค่าปรับ", style=discord.ButtonStyle.success)
+    async def manage_fines(self, it, b):
+        members = get_gang_members(it.guild)
+        if not members: return await it.response.send_message("❌ ไม่พบสมาชิกมียศที่กำหนด", ephemeral=True)
+        await it.response.send_message("🛠 **เมนูแอดมิน:** เลือกสมาชิกเพื่อเช็กกิจกรรมย้อนหลังหลังเที่ยงคืน", view=AttendanceView(members), ephemeral=True)
 
 bot.run(TOKEN)
