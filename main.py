@@ -347,7 +347,7 @@ class AdminPanelView(discord.ui.View):
 async def daily_report_task():
     n = get_thai_time()
     # รายวัน 00:05 น.
-    if n.hour == 4 and n.minute == 15:
+    if n.hour == 4 and n.minute == 25:
         cfg = load_json(CONFIG_PATH, {})
         ch_id = cfg.get("daily_ch", 0)
         if ch_id:
@@ -374,7 +374,7 @@ async def daily_report_task():
                 
                 em = discord.Embed(
                     title=f"**📋 __รายงานสรุปการลาประจำวัน__**",
-                    description=f"**📅 วันที่ {yesterday.strftime('%d/%m/%Y')}**\n{separator}",
+                    description=f"**📅 ของวันที่ {yesterday.strftime('%d/%m/%Y')}**\n{separator}",
                     color=0x9b59b6 if ac else 0x2ecc71
                 )
 
@@ -409,7 +409,7 @@ async def daily_report_task():
                     
                     em.add_field(name="\u200b", value=summary_msg, inline=False)
 
-                em.set_footer(text=f"ระบบรายงานอัตโนมัติ • {n.strftime('%H:%M')} น.")
+                em.set_footer(text=f"ระบบรายงานอัตโนมัติ: {get_thai_time().strftime('%d/%m/%Y %H:%M')} น.")
                 await ch.send(embed=em)
 
     # --- ฟังก์ชันสรุปรายสัปดาห์ (วางต่อจาก daily_report_task หรือก่อน bot.run) ---
