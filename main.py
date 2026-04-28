@@ -791,6 +791,13 @@ class LeaveMainView(discord.ui.View):
                 ))
         if not opts: return await it.response.send_message("❌ ไม่พบรายการที่จะยกเลิก", ephemeral=True)
         await it.response.send_message("📋 เลือกใบลาที่จะยกเลิก:", view=SubMenuView(it, CancelSelect(opts[:25])), ephemeral=True)
+
+#ปุ่มรีเฟรช refresh
+    @discord.ui.button(label="🔄 อัปเดตรายชื่อ", style=discord.ButtonStyle.secondary, custom_id="refresh_leave_board")
+    async def refresh_board(self, it: discord.Interaction, b: discord.ui.Button):
+        await it.response.defer(ephemeral=True)
+        await update_leave_board(it.guild)
+        await it.followup.send("✅ อัปเดตรายชื่อบนบอร์ดเรียบร้อยแล้ว!", ephemeral=True)
     
     @discord.ui.button(label="✏️ แก้ไขวันสิ้นสุดการลา", style=discord.ButtonStyle.secondary, custom_id="v_l_final_vMaster_DMD_master_4")
     async def l_ed(self, it, b):
@@ -813,13 +820,8 @@ class LeaveMainView(discord.ui.View):
                     value=str(i)
                 ))
         if not opts: return await it.response.send_message("❌ ไม่พบรายการที่สามารถแก้ไขได้ (ต้องเป็นการลาหลายวัน)", ephemeral=True)
-        await it.response.send_message("✏️ เลือกใบลาที่จะแก้:", view=SubMenuView(it, EditLeaveSelect(opts[:25], it)), ephemeral=True)
+        await it.response.send_message("✏️ เลือกใบลาที่จะแก้:", view=SubMenuView(it, EditLeaveSelect(opts[:25], it)), ephemeral=True)   
 
-     @discord.ui.button(label="🔄 อัปเดตรายชื่อ", style=discord.ButtonStyle.secondary, custom_id="refresh_leave_board")
-    async def refresh_board(self, it: discord.Interaction, b: discord.ui.Button):
-        await it.response.defer(ephemeral=True)
-        await update_leave_board(it.guild)
-        await it.followup.send("✅ อัปเดตรายชื่อบนบอร์ดเรียบร้อยแล้ว!", ephemeral=True)   
 
 class FriendSelect(discord.ui.UserSelect):
     def __init__(self):
