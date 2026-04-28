@@ -865,13 +865,118 @@ async def backup(ctx):
     await ctx.send(f"✅ ส่งไฟล์ Backup เข้า DM ของแอดมินทั้งหมด {count} ท่านเรียบร้อยแล้ว")
 
 
-@bot.event
-async def on_ready():
-    bot.add_view(LeaveMainView())
-    print('Bot DMD Online | System Year: 2026')
-    if not daily_report_task.is_running(): daily_report_task.start()
-    if not weekly_report_task.is_running():
-        weekly_report_task.start()
+# ==========================================
+# ส่วนที่เพิ่มใหม่: ระบบจัดการค่าปรับและอนุมัติหลักฐาน (DMD)
+# ==========================================
+
+# 1. หน้าต่าง Modal สำหรับสมาชิกส่งลิงก์รูปหลักฐาน
+class PaymentModal(discord.ui.Modal, title='💳 แจ้งชำระค่าปรับ (Dark Monday)'):
+    evidence_url = discord.ui.TextInput(
+        label='ลิงก์รูปภาพหลักฐาน (ต้องเป็นลิงก์เท่านั้น)',
+        placeholder='https://cdn.discordapp.com/attachments/...',
+        required=True
+    )
+    note = discord.ui.TextInput(
+        label='หมายเหตุ (ใส่ชื่อแอดมินที่รับเงินในเกม)',
+        style=discord.TextStyle.paragraph,
+        required=False,
+        placeholder='จ่ายให้แอดมิน... เรียบร้อยครับ'
+    )
+
+    async def on_submit(self, it: discord.Interaction):
+        url_pattern = re.compile(r'^https?://\S+')
+        if not url_pattern.match(self.evidence_url.value):
+            return await it.response.send_message("❌ รูปแบบลิงก์ไม่ถูกต้อง! กรุณาใส่ลิงก์ที่ขึ้นต้นด้วย http หรือ https", ephemeral=True)
+
+        conf = load_json(CONFIG_PATH, {})
+        log_ch_id = conf.get('payment_log_ch')
+        if not log_ch_id:
+            return await it.response.send_message("❌ แอดมินยังไม่ได้ตั้งค่าห้องตรวจสลิป", ephemeral=True)
+
+        log_ch = bot.get_channel(int(log_ch_id))
+        embed = discord.Embed(title="🧾 มีการแจ้งชำระค่าปรับใหม่", color=0x3498db, timestamp=get_thai_time())
+        embed.add_field(name="จากสมาชิก", value=f"{it.user.mention}", inline=False)
+        embed.add_field(name="หมายเหตุ", value=self.note.value or "ไม่ได้ระบุ", inline=False)
+        embed.set_image(url=self.evidence_url.value)
+        
+        # ส่งไปให้แอดมินตรวจ พร้อมปุ่ม อนุมัติ/ปฏิเสธ
+        # ดึงยอดเงินจากระบบ (ถ้ามี) หรือใส่เป็น 0 ไว้ก่อน
+        view = AdminVerifyView(it.user.id, 0) 
+        await log_ch.send(embed=embed, view=view)
+        await it.response.send_message("✅ ส่งหลักฐานเรียบร้อยแล้วครับ!", ephemeral=True)
+
+# 2. ปุ่มที่สมาชิกจะกดใต้ประกาศค่าปรับ (ตัวที่บอทหาไม่เจอ)
+class MemberPaymentView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="💳 แจ้งชำระค่าปรับ (ส่งรูป)", style=discord.ButtonStyle.primary, custom_id="btn_pay_fine")
+    async def pay_button(self, it: discord.Interaction, button: discord.ui.Button):
+        await it.response.send_modal(PaymentModal())
+
+# 3. ระบบจัดการการเช็กชื่อ 30 คน
+class AttendanceMemberSelect(discord.ui.Select):
+    def __init__(self, members):
+        options = [discord.SelectOption(label=m.display_name, value=str(m.id)) for m in members]
+        super().__init__(placeholder="🔍 เลือกสมาชิกที่ต้องการเช็กชื่อ...", options=options)
+    async def callback(self, it: discord.Interaction):
+        view: AttendanceView = self.view
+        view.selected_id = int(self.values[0])
+        await view.update_message(it)
+
+class AttendanceView(discord.ui.View):
+    def __init__(self, members):
+        super().__init__(timeout=None)
+        self.members = members
+        self.selected_id = None
+        self.results = {}
+        self.add_item(AttendanceMemberSelect(members))
+
+    async def update_message(self, it: discord.Interaction):
+        m = it.guild.get_member(self.selected_id)
+        embed = discord.Embed(title="📝 ระบบเช็กชื่อกิจกรรม (หลังเที่ยงคืน)", color=0xf1c40f)
+        embed.add_field(name="สมาชิก", value=m.mention if m else "ยังไม่ได้เลือก")
+        await it.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="แอร์ดรอป 21:00", style=discord.ButtonStyle.secondary)
+    async def act1(self, it, b): await self.toggle(it, b, "แอร์ดรอป 21:00")
+    @discord.ui.button(label="อีเธอร์", style=discord.ButtonStyle.secondary)
+    async def act2(self, it, b): await self.toggle(it, b, "อีเธอร์")
+    @discord.ui.button(label="สกายฟอล", style=discord.ButtonStyle.secondary)
+    async def act3(self, it, b): await self.toggle(it, b, "สกายฟอล")
+    @discord.ui.button(label="แอร์ดรอป 00:00", style=discord.ButtonStyle.secondary)
+    async def act4(self, it, b): await self.toggle(it, b, "แอร์ดรอป 00:00")
+
+    async def toggle(self, it, b, name):
+        if not self.selected_id: return await it.response.send_message("❌ เลือกสมาชิกรวมก่อน", ephemeral=True)
+        if self.selected_id not in self.results: self.results[self.selected_id] = set()
+        if name in self.results[self.selected_id]:
+            self.results[self.selected_id].remove(name)
+            b.style = discord.ButtonStyle.secondary
+        else:
+            self.results[self.selected_id].add(name)
+            b.style = discord.ButtonStyle.danger
+        await it.response.edit_message(view=self)
+
+    @discord.ui.button(label="💾 บันทึกและแจ้งยอด", style=discord.ButtonStyle.success, row=4)
+    async def save_all(self, it, b):
+        conf = load_json(CONFIG_PATH, {})
+        ch_id = conf.get('fine_ch')
+        if not ch_id: return await it.response.send_message("❌ ยังไม่ได้ตั้งค่าห้องแจ้งยอด", ephemeral=True)
+        ch = bot.get_channel(int(ch_id))
+        f_data = load_fines()
+        
+        msg = "🔔 **สรุปยอดค่าปรับรายวัน**\n"
+        for mid, acts in self.results.items():
+            cnt = len(acts)
+            if cnt == 0: continue
+            fine = 500000 if cnt == 4 else cnt * 200000
+            f_data["unpaid_fines"][str(mid)] = f_data["unpaid_fines"].get(str(mid), 0) + fine
+            msg += f"- <@{mid}> ขาด {cnt} อย่าง ปรับ **{fine:,} WD**\n"
+        
+        save_fines(f_data)
+        await ch.send(msg, view=MemberPaymentView())
+        await it.response.send_message("✅ สำเร็จ!", ephemeral=True)
 
 # --- ส่วนที่เพิ่มใหม่: ระบบจัดการค่าปรับและอนุมัติหลักฐาน (DMD) ---
 
@@ -1028,5 +1133,14 @@ class AttendanceView(discord.ui.View):
         members = get_gang_members(it.guild)
         if not members: return await it.response.send_message("❌ ไม่พบสมาชิกมียศที่กำหนด", ephemeral=True)
         await it.response.send_message("🛠 **เมนูแอดมิน:** เลือกสมาชิกเพื่อเช็กกิจกรรมย้อนหลังหลังเที่ยงคืน", view=AttendanceView(members), ephemeral=True)
+
+
+@bot.event
+async def on_ready():
+    bot.add_view(LeaveMainView())
+    print('Bot DMD Online | System Year: 2026')
+    if not daily_report_task.is_running(): daily_report_task.start()
+    if not weekly_report_task.is_running():
+        weekly_report_task.start()
 
 bot.run(TOKEN)
