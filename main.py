@@ -347,7 +347,7 @@ class AdminPanelView(discord.ui.View):
 async def daily_report_task():
     n = get_thai_time()
     # รายวัน 00:05 น.
-    if n.hour == 3 and n.minute == 40:
+    if n.hour == 4 and n.minute == 5:
         cfg = load_json(CONFIG_PATH, {})
         ch_id = cfg.get("daily_ch", 0)
         if ch_id:
@@ -373,7 +373,7 @@ async def daily_report_task():
                 separator = "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"
                 
                 em = discord.Embed(
-                    title=f"# 📋 รายงานสรุปการลาประจำวัน",
+                    title=f"📋 รายงานสรุปการลาประจำวัน",
                     description=f"**📅 ของวันที่ {yesterday.strftime('%d/%m/%Y')}**\n{separator}",
                     color=0x9b59b6 if ac else 0x2ecc71
                 )
@@ -383,19 +383,19 @@ async def daily_report_task():
                 else:
                     msg = ""
                     for i in ac:
-                        tg = bot.get_user(int(i['target_id']))
+                        tg = ch.guild.get_member(int(i['target_id']))
                         tn = tg.display_name if tg else f"ID: {i['target_id']}"
                         cat = i.get('leave_category', 'ทั่วไป')
                         
                         # แสดงผล: 👤 ชื่อ — [ประเภท]
                         msg += f"👤 **{tn}** — ` {cat} `\n"
                         # แสดงผล: ┗ 💬 เหตุผล
-                        msg += f"┗ 💬 {i['reason']}"
+                        msg += f"┗ 💬 เหตุผล: {i['reason']}"
                         
                         if i['user_id'] != i['target_id']:
-                            su = bot.get_user(int(i['user_id']))
-                            sn = su.name if su else f"ID: {i['user_id']}"
-                            msg += f" *(โดย: @{sn})*"
+                            su = ch.guild.get_member(int(i['user_id']))
+                            sn = su.display_name if su else f"ID: {i['user_id']}"
+                            msg += f" *(ผู้ลาแทน: @{sn})*"
                         msg += "\n\n"
                     
                     # รายชื่อคนลา
