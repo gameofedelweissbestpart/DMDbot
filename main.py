@@ -43,6 +43,16 @@ def validate_date(d_str):
         return True
     except:
         return False
+#รีเฟรช refresh
+class RealtimeRefreshView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="🔄 อัปเดตรายชื่อ", style=discord.ButtonStyle.secondary, custom_id="refresh_realtime_board")
+    async def refresh_board(self, it: discord.Interaction, b: discord.ui.Button):
+        await it.response.defer(ephemeral=True)
+        await update_summary_board() # เรียกตัวเองเพื่ออัปเดตข้อมูล
+        await it.followup.send("✅ อัปเดตข้อมูลรายชื่อล่าสุดเรียบร้อยแล้ว!", ephemeral=True)        
 
 # --- 2. ระบบตาราง Real-time (ปรับหัวข้อตามสั่ง) ---
 async def update_summary_board():
@@ -98,9 +108,9 @@ async def update_summary_board():
                 break
     
     if target:
-        await target.edit(embed=em)
+        await target.edit(embed=em, view=RealtimeRefreshView()) # ใส่ปุ่มเข้าไป
     else:
-        await channel.send(embed=em)
+        await channel.send(embed=em, view=RealtimeRefreshView()) # ใส่ปุ่มเข้าไป
 
 # --- 3. ระบบแจ้งลาและ Log (บังคับ ค.ศ. / ลาไม่เกิน 15 วัน / แยกสี Log) ---
 class LeaveModal(discord.ui.Modal):
@@ -751,15 +761,10 @@ class LeaveMainView(discord.ui.View):
     @discord.ui.button(label="📝 แจ้งลา", style=discord.ButtonStyle.success, custom_id="v_l_final_vMaster_DMD_master_1")
     async def l_me(self, it, b):
         await it.response.send_message("🤔 ลาช่วงไหน:", view=SubMenuView(it, DateSelect()), ephemeral=True)
+
     @discord.ui.button(label="👥 ลาแทนเพื่อน", style=discord.ButtonStyle.primary, custom_id="v_l_final_vMaster_DMD_master_2")
     async def l_fr(self, it, b):
-        await it.response.send_message("👤 เลือกเพื่อน:", view=SubMenuView(it, FriendSelect()), ephemeral=True)
-    #ปุ่มรีเฟรช refresh
-    @discord.ui.button(label="🔄 อัปเดตรายชื่อ", style=discord.ButtonStyle.secondary, custom_id="refresh_leave_board")
-    async def refresh_board(self, it: discord.Interaction, b: discord.ui.Button):
-        await it.response.defer(ephemeral=True)
-        await update_leave_board(it.guild)
-        await it.followup.send("✅ อัปเดตรายชื่อบนบอร์ดเรียบร้อยแล้ว!", ephemeral=True)    
+        await it.response.send_message("👤 เลือกเพื่อน:", view=SubMenuView(it, FriendSelect()), ephemeral=True)   
     
     @discord.ui.button(label="❌ ยกเลิกการลา", style=discord.ButtonStyle.danger, custom_id="v_l_final_vMaster_DMD_master_3")
     async def l_cn(self, it, b):
@@ -1023,6 +1028,8 @@ class AttendanceView(discord.ui.View):
 # --- ย้าย on_ready มาไว้ท้ายสุด และใส่ add_view ให้ครบ ---
 @bot.event
 async def on_ready():
+    bot.add_view(LeaveMainView())
+    bot.add_view(RealtimeRefreshView())
     bot.add_view(LeaveMainView())
     bot.add_view(MemberPaymentView())
     bot.add_view(AdminVerifyView(0, 0))
