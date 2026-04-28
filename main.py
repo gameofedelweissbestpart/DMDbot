@@ -346,7 +346,7 @@ class AdminPanelView(discord.ui.View):
 async def auto_refresh_board_task():
     n = get_thai_time()
     # เมื่อถึงเวลาเที่ยงคืนตรงเป๊ะ (00:00 น.)
-    if n.hour == 5 and n.minute == 5:
+    if n.hour == 5 and n.minute == 14:
         # ไล่อัปเดตบอร์ดในทุกเซิร์ฟเวอร์ที่บอทอยู่
         for guild in bot.guilds:
             try:
