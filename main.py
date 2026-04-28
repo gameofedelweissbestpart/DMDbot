@@ -341,6 +341,20 @@ class AdminPanelView(discord.ui.View):
             view=AttendanceView(members), 
             ephemeral=True
         )
+# รีเฟรชบอร์ดอัตโนมัติ refresh
+@tasks.loop(minutes=1)
+async def auto_refresh_board_task():
+    n = get_thai_time()
+    # เมื่อถึงเวลาเที่ยงคืนตรงเป๊ะ (00:00 น.)
+    if n.hour == 5 and n.minute == 5:
+        # ไล่อัปเดตบอร์ดในทุกเซิร์ฟเวอร์ที่บอทอยู่
+        for guild in bot.guilds:
+            try:
+                await update_leave_board(guild)
+            except:
+                continue
+        # หน่วงเวลา 60 วิ เพื่อไม่ให้ Loop ทำงานซ้ำในนาทีเดียวกัน
+        await asyncio.sleep(60)
 
 # --- 5. งานรายวัน และ รายสัปดาห์ (Auto Cleanup 30 วัน + รายสัปดาห์คลีน) ---
 @tasks.loop(minutes=1)
@@ -1019,6 +1033,8 @@ async def on_ready():
     bot.add_view(MemberPaymentView())
     bot.add_view(AdminVerifyView(0, 0))
     print('Bot DMD Online | System Year: 2026')
+    if not auto_refresh_board_task.is_running():
+        auto_refresh_board_task.start()
     if not daily_report_task.is_running(): daily_report_task.start()
     if not weekly_report_task.is_running(): weekly_report_task.start()
 
