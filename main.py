@@ -768,7 +768,6 @@ class LeaveMainView(discord.ui.View):
     @discord.ui.button(label="👥 ลาแทนเพื่อน", style=discord.ButtonStyle.primary, custom_id="v_l_final_vMaster_DMD_master_2")
     async def l_fr(self, it, b):
         await it.response.send_message("👤 เลือกเพื่อน:", view=SubMenuView(it, FriendSelect()), ephemeral=True)
-
     #ปุ่มรีเฟรช refresh
     @discord.ui.button(label="🔄 อัปเดตรายชื่อ", style=discord.ButtonStyle.secondary, custom_id="refresh_leave_board")
     async def refresh_board(self, it: discord.Interaction, b: discord.ui.Button):
