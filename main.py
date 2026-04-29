@@ -786,7 +786,7 @@ class LeaveMainView(discord.ui.View):
         is_admin = any(r.name in ["Admin", "ผู้ดูแล"] for r in it.user.roles)
         
         for i, e in enumerate(d):
-            if e['user_id'] == u_id or e['target_id'] == u_id:
+            if is_admin or e['user_id'] == u_id or e['target_id'] == u_id:
                 try:
                     if datetime.strptime(e['end_date'], "%d/%m/%Y").date() < now_date: continue
                 except: continue
@@ -814,8 +814,8 @@ class LeaveMainView(discord.ui.View):
                 try:
                     if datetime.strptime(e['end_date'], "%d/%m/%Y").date() < now_date: continue
                 except: continue
-                tg = bot.get_user(int(e['target_id']))
-                tn = tg.display_name if tg else f"ID: {e['target_id']}"
+                target_member = it.guild.get_member(int(e['target_id']))
+                tn = target_member.display_name if target_member else e['name']
                 dr = e['start_date'] if e['start_date'] == e['end_date'] else f"{e['start_date']} - {e['end_date']}"
                 
                 opts.append(discord.SelectOption(
