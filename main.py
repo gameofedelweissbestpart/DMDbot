@@ -315,6 +315,12 @@ class AdminCatSelect(discord.ui.Select):
         cat_final = self.values[0]
         await it.response.edit_message(content=f"🎯 กำลังตั้งค่า: **{cat_final}**", view=AdminSubMenuView(cat_final))
 
+# --- Class สำหรับเป็นหน้ากาก (Container) ให้ Dropdown เลือกหัวข้อ ---
+class SubMenuView(discord.ui.View):
+    def __init__(self, it, select_item):
+        super().__init__(timeout=120)
+        self.add_item(select_item)
+
 # --- ส่วนที่ 1: หน้าเลือกเลือกระบบ (ลา หรือ ปรับเงิน) ---
 class CategorySelectionView(discord.ui.View):
     def __init__(self):
@@ -780,12 +786,12 @@ class LeaveMainView(discord.ui.View):
         is_admin = any(r.name in ["Admin", "ผู้ดูแล"] for r in it.user.roles)
         
         for i, e in enumerate(d):
-            if is_admin or e['user_id'] == u_id or e['target_id'] == u_id:
+            if e['user_id'] == u_id or e['target_id'] == u_id:
                 try:
                     if datetime.strptime(e['end_date'], "%d/%m/%Y").date() < now_date: continue
                 except: continue
-                tg = bot.get_user(int(e['target_id']))
-                tn = tg.display_name if tg else f"ID: {e['target_id']}"
+                target_member = it.guild.get_member(int(e['target_id']))
+                tn = target_member.display_name if target_member else e['name']
                 dr = e['start_date'] if e['start_date'] == e['end_date'] else f"{e['start_date']} - {e['end_date']}"
                 
                 opts.append(discord.SelectOption(
