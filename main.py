@@ -359,7 +359,7 @@ class AdminPanelView(discord.ui.View):
 async def daily_report_task():
     n = get_thai_time()
     # รายวัน 00:05 น.
-    if n.hour == 0 and n.minute == 5:
+    if n.hour == 7 and n.minute == 55:
         cfg = load_json(CONFIG_PATH, {})
         ch_id = cfg.get("daily_ch", 0)
         if ch_id:
@@ -489,7 +489,7 @@ async def weekly_report_task():
                 em = discord.Embed(
                     title="📊 รายงานสรุปการลาประจำสัปดาห์",
                     description=f"**ช่วงวันที่ {start_week.strftime('%d/%m/%Y')} - {end_week.strftime('%d/%m/%Y')}**\n{separator}",
-                    color=0x3498db
+                    color=0x2B2D31
                 )
 
                 # รายชื่อคนลา
