@@ -81,7 +81,7 @@ async def update_summary_board():
 
     # ปรับหัวข้อตามสั่ง: ตัด "ของวันนี้" ออก และใช้หัวข้อนี้เสมอ
     desc = f"# 📋 รายชื่อสมาชิกที่แจ้งลา (Real-time)\n{LONG_SEP}\n\n"
-    em = discord.Embed(description=desc, color=discord.Color.dark_grey())
+    em = discord.Embed(description=desc, color=0x2B2D31)
     
     if not active:
         desc += "> 🍃 **ขณะนี้ยังไม่มีสมาชิกแจ้งลาในระบบ**\n\n"
@@ -295,7 +295,7 @@ class AdminSubMenuView(discord.ui.View):
                     "- ระบบไม่อนุญาตให้ลาย้อนหลัง หากมีเหตุฉุกเฉินให้แจ้งแอดมินโดยตรง\n"
                     "- โปรดตรวจสอบข้อมูลให้ถูกต้อง การแจ้งลาเท็จจะมีบทลงโทษตามกฎแก๊ง"
                 ), 
-                color=0x3498db
+                color=0x2B2D31
             )
             await bot.get_channel(int(self.temp_ch)).send(embed=em, view=LeaveMainView())
         elif self.cat == "realtime_ch":
@@ -387,7 +387,7 @@ async def daily_report_task():
                 em = discord.Embed(
                     title=f"**📋 __รายงานสรุปการลาประจำวัน__**",
                     description=f"**📅 ของวันที่ {yesterday.strftime('%d/%m/%Y')}**\n{separator}",
-                    color=0x9b59b6 if ac else 0x2ecc71
+                    color=0x2B2D31 if ac else 0x2ecc71
                 )
 
                 if not ac:
