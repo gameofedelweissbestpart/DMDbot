@@ -321,7 +321,7 @@ class CategorySelectionView(discord.ui.View):
         super().__init__(timeout=60)
 
     # ปุ่มระบบแจ้งลา
-    @discord.ui.button(label="📝 ระบบแจ้งลา", style=discord.ButtonStyle.primary, emoji="📋")
+    @discord.ui.button(label="📝 ระบบแจ้งลา", style=discord.ButtonStyle.primary, emoji="📋", custom_id="setup_leave_system")
     async def leave_system_setup(self, it: discord.Interaction, button: discord.ui.Button):
         opts = [
             discord.SelectOption(label="📝 ห้องปุ่มแจ้งลา", value="leave_ch"),
@@ -333,7 +333,7 @@ class CategorySelectionView(discord.ui.View):
         await it.response.edit_message(content="🛠 **ระบบแจ้งลา:** เลือกหัวข้อที่ต้องการตั้งค่า:", view=SubMenuView(it, AdminCatSelect(opts)))
 
     # ปุ่มระบบแจ้งปรับเงิน (ที่คุณสั่งเพิ่ม)
-    @discord.ui.button(label="💰 ระบบแจ้งปรับเงิน", style=discord.ButtonStyle.danger, emoji="💸")
+    @discord.ui.button(label="💰 ระบบแจ้งปรับเงิน", style=discord.ButtonStyle.danger, emoji="💸", custom_id="setup_fine_system")
     async def fine_system_setup(self, it: discord.Interaction, button: discord.ui.Button):
         opts = [
             discord.SelectOption(label="📋 แจ้งค่าปรับ Real-time", value="fine_realtime_ch"),
@@ -346,16 +346,16 @@ class AdminPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="📍 ตั้งค่าห้องต่างๆ", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="📍 ตั้งค่าห้องต่างๆ", style=discord.ButtonStyle.primary, custom_id="admin_room_settings")
     async def set_l(self, it, b):
-        # เปลี่ยนจาก SubMenuView เป็น CategorySelectionView เพื่อให้เจอ 2 ปุ่มใหม่ก่อน
-        await it.response.send_message("🛠 เลือกหมวดหมู่ที่ต้องการตั้งค่า:", view=CategorySelectionView(), ephemeral=True)
+        # เรียกหน้าเลือกหมวดหมู่
+        await it.response.send_message("📂 **เลือกหมวดหมู่ที่ต้องการจัดการ:**", view=CategorySelectionView(), ephemeral=True)
 
     # ... ปุ่มอื่นๆ (ล้างข้อมูล, แก้ไขใบลา) ด้านล่างนี้ให้ปล่อยไว้เหมือนเดิม ...
     
     # กฎข้อที่ 13: ปุ่มล้างข้อมูลทั้งหมด
-    @discord.ui.button(label="🗑️ ล้างข้อมูลทั้งหมด", style=discord.ButtonStyle.danger)
-    async def clear_all(self, it, b):
+    @discord.ui.button(label="🗑️ ล้างข้อมูลใบลา (รายสัปดาห์)", style=discord.ButtonStyle.danger, custom_id="admin_clear_leave")
+    async def clear_data(self, it, b):
         txt = "⚠️ **คุณยืนยันที่จะล้างข้อมูลใบลาทั้งหมดใช่หรือไม่?**\nการกระทำนี้จะลบข้อมูลถาวรและส่งไฟล์ Backup ให้แอดมินทุกคน"
         await it.response.send_message(content=txt, view=ConfirmClearView(), ephemeral=True)
 
@@ -364,7 +364,7 @@ class AdminPanelView(discord.ui.View):
 async def daily_report_task():
     n = get_thai_time()
     # รายวัน 00:05 น.
-    if n.hour == 1 and n.minute == 0:
+    if n.hour == 0 and n.minute == 5:
         cfg = load_json(CONFIG_PATH, {})
         ch_id = cfg.get("daily_ch", 0)
         if ch_id:
