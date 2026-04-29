@@ -354,41 +354,37 @@ class AdminCatSelect(discord.ui.Select):
 class AdminPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
+
     @discord.ui.button(label="⚙️ ตั้งค่าห้องต่างๆ", style=discord.ButtonStyle.secondary, row=0)
     async def set_l(self, it, b):
+        # รายชื่อ 8 ห้องตามที่คุณสั่งเป๊ะๆ
         opts = [
-            # 5 ห้องระบบเดิมที่คงไว้
             discord.SelectOption(label="📝 ห้องปุ่มแจ้งลา", value="leave_ch"),
             discord.SelectOption(label="📋 ตาราง Real-time", value="realtime_ch"),
             discord.SelectOption(label="📌 Log แจ้งลา", value="log_ch"),
             discord.SelectOption(label="📊 ประวัติรายวัน", value="daily_ch"),
             discord.SelectOption(label="📊 สรุปประวัติรายสัปดาห์", value="weekly_ch"),
-            
-            # 3 ห้องระบบใหม่ที่มาแทนที่ 2 ห้องเดิม
             discord.SelectOption(label="📋 แจ้งค่าปรับ Real-time", value="fine_realtime_ch"),
             discord.SelectOption(label="📌 Log การปรับเงิน", value="fine_log_ch"),
             discord.SelectOption(label="✅ อนุมัติการชำระเงิน", value="approve_ch")
         ]
-        
         select = discord.ui.Select(placeholder="เลือกห้องที่ต้องการตั้งค่า...", options=opts)
-
+        
         async def sel_callback(interaction):
             conf = load_json(CONFIG_PATH, {})
+            # บันทึก ID ของห้องนั้นๆ ลงในชื่อที่เราเลือก
             conf[select.values[0]] = interaction.channel.id
             save_json(CONFIG_PATH, conf)
-            await interaction.response.send_message(f"✅ ตั้งค่าห้อง <#{interaction.channel.id}> เรียบร้อย!", ephemeral=True)
-
-        select.callback = sel_callback
-        v = discord.ui.View()
-        v.add_item(select)
+            await interaction.response.send_message(f"✅ ตั้งค่าห้องเรียบร้อย!", ephemeral=True)
         
-        # ปุ่ม 🔴 ปิดเมนู
+        select.callback = sel_callback
+        v = discord.ui.View(); v.add_item(select)
+        # ปุ่มปิดเมนูสีแดง
         btn_close = discord.ui.Button(label="🔴 ปิดเมนู", style=discord.ButtonStyle.danger)
         async def close_cb(interaction): await interaction.message.delete()
-        btn_close.callback = close_cb
-        v.add_item(btn_close)
+        btn_close.callback = close_cb; v.add_item(btn_close)
         
-        await it.response.send_message("🛠️ กรุณาเลือกประเภทห้องที่ต้องการตั้งค่า (เลือกในห้องนั้นๆ):", view=v, ephemeral=True)
+        await it.response.send_message("🛠️ กรุณาเลือกประเภทห้องที่ต้องการตั้งค่า (กดในห้องที่ต้องการใช้):", view=v, ephemeral=True)
 
     @discord.ui.button(label="🔴 ปิดเมนู", style=discord.ButtonStyle.danger, row=1)
     async def close_menu(self, it, b):
@@ -1098,16 +1094,23 @@ class AttendanceView(discord.ui.View):
             # คำนวณเงิน: ขาด 4 รอบปรับ 5 แสน / ที่เหลือรอบละ 2 แสน
             fine = 500000 if cnt == 4 else cnt * 200000
             
-            # บันทึกยอดลงไฟล์
+            # บันทึกยอดค้างชำระลงไฟล์
             f_data["unpaid_fines"][str(mid)] = f_data["unpaid_fines"].get(str(mid), 0) + fine
             
-            # ดึงชื่อ และใช้ ▫️ (ไม่ Mention)
+            # ดึงชื่อ Display Name และใส่ ▫️ (ไม่ Mention)
             m = it.guild.get_member(mid)
             m_name = m.display_name if m else f"Unknown({mid})"
             log_details += f"▫️ {m_name}: `{fine:,}` WD\n"
             total_fine_today += fine
 
         save_fines(f_data)
+        
+        # --- ส่วนที่ขาดไปและสำคัญมาก (ต้องมีตรงนี้บอทถึงจะส่ง Log) ---
+        await send_fine_log(it.guild, "บันทึกออกบิลค่าปรับ", 
+                            f"▫️ ยอดรวมบิลใหม่: `{total_fine_today:,}` WD\n"
+                            f"**📄 รายละเอียด:**\n{log_details}", it.user.display_name)
+        
+        await it.response.send_message("✅ บันทึกยอดและลง Log เรียบร้อย!", ephemeral=True)
         
         # ส่ง Log ไปห้อง 📌 Log การปรับเงิน (แบบชิดซ้าย ตามสั่ง)
         await send_fine_log(it.guild, "บันทึกออกบิลค่าปรับ", 
@@ -1136,21 +1139,14 @@ class AttendanceView(discord.ui.View):
 # --- ย้าย on_ready มาไว้ท้ายสุด และใส่ add_view ให้ครบ ---
 @bot.event
 async def on_ready():
-    # --- 1. ระบบเดิมที่คุณมีอยู่แล้ว ---
+    # สั่งให้บอทจำปุ่มแจ้งลา (ระบบเดิม)
     bot.add_view(LeaveMainView())
-    bot.add_view(RealtimeRefreshView())
+    # สั่งให้บอทจำปุ่มหน้าตั้งค่า 8 ห้อง (ที่เราเพิ่งทำ)
+    bot.add_view(AdminPanelView())
+    # สั่งให้บอทจำปุ่มเช็กยอดของสมาชิก (ที่เราเพิ่งทำ)
     bot.add_view(MemberPaymentView())
-    bot.add_view(AdminVerifyView(0, 0)) # ต้องระวังเรื่องค่า 0, 0 ถ้าโค้ดใหม่เปลี่ยนโครงสร้าง
-
-    # --- 2. เพิ่มระบบใหม่ที่เราเพิ่งสร้าง (สำคัญมาก) ---
-    bot.add_view(AdminMainView())      # สำหรับหน้าจัดการหลักที่มีปุ่มปิดเมนู
-    bot.add_view(AdminSettingsView())  # สำหรับหน้าตั้งค่าห้อง 8 ห้อง
-    bot.add_view(MemberFinesView())     # สำหรับปุ่ม "ตรวจสอบยอด" และ "จ่ายเงิน" ในบิลรวม
-
-    print('✅ Bot DMD Online | System Year: 2026')
-    print('🛡️ ระบบ Log ชิดซ้าย และ Auto-Backup พร้อมใช้งาน')
-
-    # --- 3. รันระบบ Task อัตโนมัติ ---
+    
+    print(f'✅ บอท DMD ออนไลน์แล้วในชื่อ: {bot.user}')
     if not daily_report_task.is_running(): daily_report_task.start()
     if not weekly_report_task.is_running(): weekly_report_task.start()
 
