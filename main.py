@@ -79,9 +79,9 @@ async def update_summary_board():
         except:
             continue
 
-    em = discord.Embed(color=0xf1c40f if active else 0x2ecc71)
     # ปรับหัวข้อตามสั่ง: ตัด "ของวันนี้" ออก และใช้หัวข้อนี้เสมอ
     desc = f"# 📋 รายชื่อสมาชิกที่แจ้งลา (Real-time)\n{LONG_SEP}\n\n"
+    em = discord.Embed(description=desc, color=discord.Color.dark_grey())
     
     if not active:
         desc += "> 🍃 **ขณะนี้ยังไม่มีสมาชิกแจ้งลาในระบบ**\n\n"
