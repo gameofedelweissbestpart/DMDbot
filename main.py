@@ -1,12 +1,15 @@
 import discord
 from discord.ext import commands, tasks
-import json, os, re, asyncio
+import json, os, re, asyncio, shutil
 from datetime import datetime, timedelta
 
 # --- 1. การจัดการข้อมูล (คงเดิมจากไฟล์ฐาน) ---
 TOKEN = os.getenv('DISCORD_TOKEN')
 CONFIG_PATH = '/app/data/config.json'
 DB_LEAVE = '/app/data/gang_leaves.json'
+FINE_DATA_PATH = '/app/data/fine_data.json'       # <--- เพิ่ม
+FINE_HISTORY_PATH = '/app/data/fine_history.json'  # <--- เพิ่ม
+BACKUP_PATH = '/app/data/fine_data.json.bak'       # <--- เพิ่ม
 LONG_SEP = "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"
 
 def load_json(p, d):
@@ -43,6 +46,39 @@ def validate_date(d_str):
         return True
     except:
         return False
+
+# --- ฟังก์ชันจัดการข้อมูลค่าปรับและ Backup อัตโนมัติ ---
+def load_fines():
+    # ดึงข้อมูลยอดหนี้สะสม และประวัติ
+    return load_json(FINE_DATA_PATH, {"unpaid_fines": {}, "history": {}})
+
+def save_fines(data):
+    # บันทึกข้อมูลและทำ Backup ทันที
+    save_json(FINE_DATA_PATH, data)
+    if os.path.exists(FINE_DATA_PATH):
+        shutil.copyfile(FINE_DATA_PATH, BACKUP_PATH)
+
+# --- ระบบส่ง Log (ชิดซ้ายสุด / ▫️ / ไม่มี :) ---
+async def send_fine_log(guild, title, description, admin_name=None):
+    conf = load_json(CONFIG_PATH, {})
+    log_ch_id = conf.get('fine_log_ch') # ดึง ID ห้อง Log การปรับเงิน
+    if not log_ch_id: return
+    channel = guild.get_channel(int(log_ch_id))
+    if not channel: return
+
+    admin_info = f"**👤 แอดมินผู้ดำเนินการ:** `{admin_name}`\n" if admin_name else ""
+    
+    # สร้าง Embed สไตล์ที่คุณต้องการเป๊ะๆ
+    embed = discord.Embed(
+        description=f"**📌{title}**\n"
+                    f"{admin_info}"
+                    f"{description}\n"
+                    f"{LONG_SEP}",
+        color=0x2f3136
+    )
+    embed.set_footer(text=f"🕒 บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y | %H:%M:%S น.')}")
+    await channel.send(embed=embed)
+        
 #รีเฟรช refresh
 class RealtimeRefreshView(discord.ui.View):
     def __init__(self):
@@ -359,7 +395,7 @@ class AdminPanelView(discord.ui.View):
 async def daily_report_task():
     n = get_thai_time()
     # รายวัน 00:05 น.
-    if n.hour == 7 and n.minute == 55:
+    if n.hour == 0 and n.minute == 5:
         cfg = load_json(CONFIG_PATH, {})
         ch_id = cfg.get("daily_ch", 0)
         if ch_id:
@@ -1030,12 +1066,21 @@ class AttendanceView(discord.ui.View):
 # --- ย้าย on_ready มาไว้ท้ายสุด และใส่ add_view ให้ครบ ---
 @bot.event
 async def on_ready():
+    # --- 1. ระบบเดิมที่คุณมีอยู่แล้ว ---
     bot.add_view(LeaveMainView())
     bot.add_view(RealtimeRefreshView())
-    bot.add_view(LeaveMainView())
     bot.add_view(MemberPaymentView())
-    bot.add_view(AdminVerifyView(0, 0))
-    print('Bot DMD Online | System Year: 2026')
+    bot.add_view(AdminVerifyView(0, 0)) # ต้องระวังเรื่องค่า 0, 0 ถ้าโค้ดใหม่เปลี่ยนโครงสร้าง
+
+    # --- 2. เพิ่มระบบใหม่ที่เราเพิ่งสร้าง (สำคัญมาก) ---
+    bot.add_view(AdminMainView())      # สำหรับหน้าจัดการหลักที่มีปุ่มปิดเมนู
+    bot.add_view(AdminSettingsView())  # สำหรับหน้าตั้งค่าห้อง 8 ห้อง
+    bot.add_view(MemberFinesView())     # สำหรับปุ่ม "ตรวจสอบยอด" และ "จ่ายเงิน" ในบิลรวม
+
+    print('✅ Bot DMD Online | System Year: 2026')
+    print('🛡️ ระบบ Log ชิดซ้าย และ Auto-Backup พร้อมใช้งาน')
+
+    # --- 3. รันระบบ Task อัตโนมัติ ---
     if not daily_report_task.is_running(): daily_report_task.start()
     if not weekly_report_task.is_running(): weekly_report_task.start()
 
