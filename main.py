@@ -315,44 +315,49 @@ class AdminCatSelect(discord.ui.Select):
         cat_final = self.values[0]
         await it.response.edit_message(content=f"🎯 กำลังตั้งค่า: **{cat_final}**", view=AdminSubMenuView(cat_final))
 
-class AdminPanelView(discord.ui.View):
+# --- ส่วนที่ 1: หน้าเลือกเลือกระบบ (ลา หรือ ปรับเงิน) ---
+class CategorySelectionView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None)
-    @discord.ui.button(label="📍 ตั้งค่าห้องระบบลา", style=discord.ButtonStyle.primary)
-    async def set_l(self, it, b):
+        super().__init__(timeout=60)
+
+    # ปุ่มระบบแจ้งลา
+    @discord.ui.button(label="📝 ระบบแจ้งลา", style=discord.ButtonStyle.primary, emoji="📋")
+    async def leave_system_setup(self, it: discord.Interaction, button: discord.ui.Button):
         opts = [
             discord.SelectOption(label="📝 ห้องปุ่มแจ้งลา", value="leave_ch"),
             discord.SelectOption(label="📋 ตาราง Real-time", value="realtime_ch"),
             discord.SelectOption(label="📌 Log แจ้งลา", value="log_ch"),
             discord.SelectOption(label="📊 ประวัติรายวัน", value="daily_ch"),
             discord.SelectOption(label="📊 สรุปประวัติรายสัปดาห์", value="weekly_ch"),
-            discord.SelectOption(label="💰 ห้องแจ้งยอดค่าปรับ", value="fine_ch"),
-            discord.SelectOption(label="🧾 ห้องตรวจสลิป/ใบเสร็จ", value="payment_log_ch")
         ]
-        await it.response.send_message("🛠 เลือกหัวข้อที่ต้องการตั้งค่า:", view=SubMenuView(it, AdminCatSelect(opts)), ephemeral=True)
+        await it.response.edit_message(content="🛠 **ระบบแจ้งลา:** เลือกหัวข้อที่ต้องการตั้งค่า:", view=SubMenuView(it, AdminCatSelect(opts)))
+
+    # ปุ่มระบบแจ้งปรับเงิน (ที่คุณสั่งเพิ่ม)
+    @discord.ui.button(label="💰 ระบบแจ้งปรับเงิน", style=discord.ButtonStyle.danger, emoji="💸")
+    async def fine_system_setup(self, it: discord.Interaction, button: discord.ui.Button):
+        opts = [
+            discord.SelectOption(label="📋 แจ้งค่าปรับ Real-time", value="fine_realtime_ch"),
+            discord.SelectOption(label="📌 Log การปรับเงิน", value="fine_log_ch"),
+            discord.SelectOption(label="✅ อนุมัติการชำระเงิน", value="fine_approve_ch"),
+        ]
+        await it.response.edit_message(content="🛠 **ระบบแจ้งปรับเงิน:** เลือกหัวข้อที่ต้องการตั้งค่า:", view=SubMenuView(it, AdminCatSelect(opts)))
+
+class AdminPanelView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="📍 ตั้งค่าห้องต่างๆ", style=discord.ButtonStyle.primary)
+    async def set_l(self, it, b):
+        # เปลี่ยนจาก SubMenuView เป็น CategorySelectionView เพื่อให้เจอ 2 ปุ่มใหม่ก่อน
+        await it.response.send_message("🛠 เลือกหมวดหมู่ที่ต้องการตั้งค่า:", view=CategorySelectionView(), ephemeral=True)
+
+    # ... ปุ่มอื่นๆ (ล้างข้อมูล, แก้ไขใบลา) ด้านล่างนี้ให้ปล่อยไว้เหมือนเดิม ...
     
     # กฎข้อที่ 13: ปุ่มล้างข้อมูลทั้งหมด
     @discord.ui.button(label="🗑️ ล้างข้อมูลทั้งหมด", style=discord.ButtonStyle.danger)
     async def clear_all(self, it, b):
         txt = "⚠️ **คุณยืนยันที่จะล้างข้อมูลใบลาทั้งหมดใช่หรือไม่?**\nการกระทำนี้จะลบข้อมูลถาวรและส่งไฟล์ Backup ให้แอดมินทุกคน"
         await it.response.send_message(content=txt, view=ConfirmClearView(), ephemeral=True)
-
-    @discord.ui.button(label="💰 จัดการเช็กชื่อ & ค่าปรับ", style=discord.ButtonStyle.success)
-    async def manage_fines(self, it: discord.Interaction, b: discord.ui.Button):
-        # 1. ต้องใส่ defer เพื่อไม่ให้ขึ้น "โต้ตอบล้มเหลว"
-        await it.response.defer(ephemeral=True) 
-        
-        # 2. ดึงรายชื่อสมาชิก
-        members = get_gang_members(it.guild)
-        if not members: 
-            return await it.followup.send("❌ ไม่พบสมาชิกมียศที่กำหนด", ephemeral=True)
-            
-        # 3. ต้องใช้ followup.send เพื่อส่งเมนูเช็กชื่อแบบ 2 กลุ่มที่เราเพิ่งวางไปท้ายไฟล์
-        await it.followup.send(
-            "🛠 **เมนูแอดมิน:** เลือกสมาชิกเพื่อเช็กกิจกรรมย้อนหลัง (แบ่ง 2 กลุ่ม)", 
-            view=AttendanceView(members), 
-            ephemeral=True
-        )
 
 # --- 5. งานรายวัน และ รายสัปดาห์ (Auto Cleanup 30 วัน + รายสัปดาห์คลีน) ---
 @tasks.loop(minutes=1)
@@ -884,157 +889,11 @@ async def backup(ctx):
                 continue
     await ctx.send(f"✅ ส่งไฟล์ Backup เข้า DM ของแอดมินทั้งหมด {count} ท่านเรียบร้อยแล้ว")
 
-
-# ==========================================
-# ส่วนที่เพิ่มใหม่: ระบบจัดการค่าปรับและอนุมัติหลักฐาน (DMD)
-# ==========================================
-
-FINE_DB = '/app/data/fines.json'
-
-def load_fines():
-    return load_json(FINE_DB, {"unpaid_fines": {}, "payment_history": []})
-
-def save_fines(data):
-    save_json(FINE_DB, data)
-
-def get_gang_members(guild):
-    target_role_id = 1456228588968739028
-    exclude_role_id = 1498319593939144755
-    members = []
-    if not guild: return []
-    for m in guild.members:
-        role_ids = [r.id for r in m.roles]
-        if target_role_id in role_ids and exclude_role_id not in role_ids:
-            members.append(m)
-    return members[:30]
-
-class RejectReasonModal(discord.ui.Modal, title='ระบุเหตุผลการปฏิเสธ'):
-    reason = discord.ui.TextInput(label='เหตุผลที่ไม่ผ่าน', placeholder='เช่น รูปไม่ชัดเจน, ยอดเงินไม่ครบ...', style=discord.TextStyle.paragraph, required=True)
-    def __init__(self, target_member, admin_name):
-        super().__init__()
-        self.target_member = target_member
-        self.admin_name = admin_name
-
-    async def on_submit(self, it: discord.Interaction):
-        await it.response.defer(ephemeral=True)
-        try:
-            msg = f"⚠️ **การแจ้งชำระค่าปรับของคุณไม่ผ่าน**\n**เหตุผล:** {self.reason.value}\n**โดยแอดมิน:** {self.admin_name}\n📌 กรุณาส่งหลักฐานใหม่อีกครั้งครับ"
-            await self.target_member.send(msg)
-            await it.followup.send(f"✅ ส่งเหตุผลให้ {self.target_member.display_name} แล้ว", ephemeral=True)
-        except:
-            await it.followup.send(f"❌ สมาชิกปิด DM", ephemeral=True)
-
-class AdminVerifyView(discord.ui.View):
-    def __init__(self, member_id, amount):
-        super().__init__(timeout=None)
-        self.member_id = member_id
-        self.amount = amount
-
-    @discord.ui.button(label="✅ อนุมัติ", style=discord.ButtonStyle.success, custom_id="approve_fine_btn")
-    async def approve(self, it: discord.Interaction, b):
-        await it.response.defer(ephemeral=True)
-        f_data = load_fines()
-        uid = str(self.member_id)
-        if uid in f_data["unpaid_fines"]:
-            del f_data["unpaid_fines"][uid]
-            f_data["payment_history"].append({"user_id": uid, "admin": it.user.display_name, "date": get_thai_time().strftime("%d/%m/%Y %H:%M")})
-            save_fines(f_data)
-            await it.edit_original_response(content="✅ อนุมัติเรียบร้อย", view=None)
-        else:
-            await it.edit_original_response(content="❌ ไม่พบยอดค้าง", view=None)
-
-class PaymentModal(discord.ui.Modal, title='💳 แจ้งชำระค่าปรับ'):
-    evidence_url = discord.ui.TextInput(label='ลิงก์รูปหลักฐาน', placeholder='https://...', required=True)
-    note = discord.ui.TextInput(label='หมายเหตุ', style=discord.TextStyle.paragraph, required=False)
-
-    async def on_submit(self, it: discord.Interaction):
-        conf = load_json(CONFIG_PATH, {})
-        log_ch_id = conf.get('payment_log_ch')
-        if not log_ch_id: return await it.response.send_message("❌ ยังไม่ตั้งห้องตรวจสลิป", ephemeral=True)
-        
-        log_ch = bot.get_channel(int(log_ch_id))
-        embed = discord.Embed(title="🧾 แจ้งชำระค่าปรับ", color=0x3498db)
-        embed.add_field(name="จาก", value=it.user.mention)
-        embed.set_image(url=self.evidence_url.value)
-        await log_ch.send(embed=embed, view=AdminVerifyView(it.user.id, 0))
-        await it.response.send_message("✅ ส่งหลักฐานแล้ว", ephemeral=True)
-
-class MemberPaymentView(discord.ui.View):
-    def __init__(self): super().__init__(timeout=None)
-    @discord.ui.button(label="💳 แจ้งชำระค่าปรับ (ส่งรูป)", style=discord.ButtonStyle.primary, custom_id="btn_pay_fine")
-    async def pay_button(self, it, b): await it.response.send_modal(PaymentModal())
-
-class AttendanceMemberSelect(discord.ui.Select):
-    def __init__(self, members, label_text):
-        opts = [discord.SelectOption(label=m.display_name, value=str(m.id)) for m in members]
-        super().__init__(placeholder=label_text, options=opts)
-    async def callback(self, it: discord.Interaction):
-        await it.response.defer(ephemeral=True)
-        view: AttendanceView = self.view
-        view.selected_id = int(self.values[0])
-        await view.update_message(it)
-
-class AttendanceView(discord.ui.View):
-    def __init__(self, members):
-        super().__init__(timeout=None)
-        self.selected_id = None
-        self.results = {}
-        g1, g2 = members[:15], members[15:30]
-        if g1: self.add_item(AttendanceMemberSelect(g1, "🔍 กลุ่ม 1 (1-15)"))
-        if g2: self.add_item(AttendanceMemberSelect(g2, "🔍 กลุ่ม 2 (16-30)"))
-
-    async def update_message(self, it):
-        m = it.guild.get_member(self.selected_id)
-        embed = discord.Embed(title="📝 เช็กชื่อกิจกรรม", color=0xf1c40f)
-        embed.add_field(name="สมาชิก", value=m.mention if m else "ยังไม่ได้เลือก")
-        await it.edit_original_response(embed=embed, view=self)
-
-    @discord.ui.button(label="แอร์ดรอป 21:00", style=discord.ButtonStyle.secondary)
-    async def act1(self, it, b): await self.toggle(it, b, "แอร์ดรอป 21:00")
-    @discord.ui.button(label="อีเธอร์", style=discord.ButtonStyle.secondary)
-    async def act2(self, it, b): await self.toggle(it, b, "อีเธอร์")
-    @discord.ui.button(label="สกายฟอล", style=discord.ButtonStyle.secondary)
-    async def act3(self, it, b): await self.toggle(it, b, "สกายฟอล")
-    @discord.ui.button(label="แอร์ดรอป 00:00", style=discord.ButtonStyle.secondary)
-    async def act4(self, it, b): await self.toggle(it, b, "แอร์ดรอป 00:00")
-
-    async def toggle(self, it, b, name):
-        if not self.selected_id: return await it.response.send_message("❌ เลือกคนก่อน", ephemeral=True)
-        if self.selected_id not in self.results: self.results[self.selected_id] = set()
-        if name in self.results[self.selected_id]:
-            self.results[self.selected_id].remove(name)
-            b.style = discord.ButtonStyle.secondary
-        else:
-            self.results[self.selected_id].add(name)
-            b.style = discord.ButtonStyle.danger
-        await it.response.edit_message(view=self)
-
-    @discord.ui.button(label="💾 บันทึกและส่งยอด", style=discord.ButtonStyle.success, row=4)
-    async def save_all(self, it, b):
-        conf = load_json(CONFIG_PATH, {})
-        ch_id = conf.get('fine_ch')
-        if not ch_id: return await it.response.send_message("❌ ยังไม่ตั้งห้องแจ้งยอด", ephemeral=True)
-        ch = bot.get_channel(int(ch_id))
-        f_data = load_fines()
-        msg = "🔔 **สรุปยอดค่าปรับวันนี้**\n"
-        for mid, acts in self.results.items():
-            cnt = len(acts)
-            if cnt == 0: continue
-            fine = 500000 if cnt == 4 else cnt * 200000
-            f_data["unpaid_fines"][str(mid)] = f_data["unpaid_fines"].get(str(mid), 0) + fine
-            msg += f"- <@{mid}> ปรับ **{fine:,} WD**\n"
-        save_fines(f_data)
-        await ch.send(msg, view=MemberPaymentView())
-        await it.response.send_message("✅ สำเร็จ", ephemeral=True)
-
 # --- ย้าย on_ready มาไว้ท้ายสุด และใส่ add_view ให้ครบ ---
 @bot.event
 async def on_ready():
     bot.add_view(LeaveMainView())
     bot.add_view(RealtimeRefreshView())
-    bot.add_view(LeaveMainView())
-    bot.add_view(MemberPaymentView())
-    bot.add_view(AdminVerifyView(0, 0))
     print('Bot DMD Online | System Year: 2026')
     if not daily_report_task.is_running(): daily_report_task.start()
     if not weekly_report_task.is_running(): weekly_report_task.start()
