@@ -493,7 +493,8 @@ class AdminFinalActionView(discord.ui.View):
 
     @discord.ui.button(label="🛑 ยกเลิกใบลานี้", style=discord.ButtonStyle.danger, custom_id="admin_cancel_leave_btn")
     async def cancel(self, it, b):
-        await it.response.send_modal(CancelReasonModal(self.idx, self.od))
+        # ส่งค่า True เพื่อบอกว่าเป็นรายการจากแอดมิน
+        await it.response.send_modal(CancelReasonModal(self.idx, self.od, is_admin_request=True))
 
     @discord.ui.button(label="🔙 ย้อนกลับ", style=discord.ButtonStyle.secondary, custom_id="admin_back_to_select_leave_btn", row=1)
     async def back(self, it: discord.Interaction, b):
@@ -614,7 +615,7 @@ class AdminEditDetailsModal(discord.ui.Modal):
                         f"• **ประเภทการลา:** {cat_log}\n"
                         f"• **จำนวนวัน:** {days_log}\n"
                         f"• **เหตุผล:** {reason_log}\n\n"
-                        f"**🛑 หมายเหตุจากแอดมิน:**\n • {admin_note}\n\n"
+                        f"**🛑 หมายเหตุจากแอดมิน:** • {admin_note}\n\n"
                         f"{LONG_SEP}"
                     )
                     em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M:%S')}")
@@ -799,9 +800,10 @@ async def weekly_report_task():
 
 # --- 6. ระบบยกเลิกใบลา (ปรับหัวข้อ Log และลบบรรทัดสถานะออก) ---
 class CancelReasonModal(discord.ui.Modal):
-    def __init__(self, target_idx, od):
+    def __init__(self, target_idx, od, is_admin_request=False): # เพิ่ม is_admin_request
         super().__init__(title="ระบุเหตุผลการยกเลิก")
         self.target_idx, self.od = target_idx, od
+        self.is_admin_request = is_admin_request # เก็บค่าไว้ใช้งานใน on_submit
         self.reason = discord.ui.TextInput(label='เหตุผลที่ยกเลิก', placeholder='ระบุเหตุผลที่นี่...', style=discord.TextStyle.paragraph, required=True)
         self.add_item(self.reason)
     
@@ -823,34 +825,34 @@ class CancelReasonModal(discord.ui.Modal):
                     except: log_ch = None
 
                 if log_ch:
-                    u_id = str(it.user.id)
-                    has_admin_role = any(r.name in ["Admin", "ผู้ดูแล"] for r in it.user.roles)
-                    is_involved = u_id == old_data['target_id'] or u_id == old_data['user_id']
-                    is_admin_action = has_admin_role and not is_involved
+                    # ตัดลอจิกเดิม (has_admin_role, is_involved) ออกทั้งหมด
+                    # ใช้ self.is_admin_request ที่เราส่งมาเป็นตัวตัดสิน
                     
-                    log_title = "📌 บันทึกการจัดการโดยผู้ดูแล (ยกเลิกใบลา)" if is_admin_action else "📌 บันทึกยกเลิกการแจ้งลา"
-                    log_color = 0xe67e22 if is_admin_action else 0xe74c3c 
+                    log_title = "📌 บันทึกการจัดการโดยผู้ดูแล (ยกเลิกใบลา)" if self.is_admin_request else "📌 บันทึกยกเลิกการแจ้งลา"
+                    log_color = 0xe67e22 if self.is_admin_request else 0xe74c3c 
                     
                     target_member = it.guild.get_member(int(old_data['target_id']))
                     tn = target_member.display_name if target_member else old_data['name']
                     
                     log_em = discord.Embed(title=log_title, color=log_color)
-                    on_behalf = f"\n**👮 ผู้ดำเนินการ:** {it.user.display_name}" + (" (Admin)" if is_admin_action else "") + "\n\n"
+                    
+                    # ถ้ามาจากหน้าแอดมิน ให้ใส่คำว่า (Admin) ต่อท้ายชื่อผู้ดำเนินการเสมอ
+                    admin_tag = " (Admin)" if self.is_admin_request else ""
+                    executor_label = "👮 ผู้ดำเนินการ" if self.is_admin_request else "👤 ผู้ดำเนินการ"
                     
                     dr = old_data['start_date'] if old_data['start_date'] == old_data['end_date'] else f"{old_data['start_date']} - {old_data['end_date']}"
-                    
-                    # --- ส่วนที่แก้ไขหัวข้อตามคำขอ ---
                     log_em.description = (
                         f"**👤 สมาชิกที่ลา:** {tn}\n"
-                        f"{on_behalf}"
+                        f"**{executor_label}:** {it.user.display_name}{admin_tag}\n\n"
                         f"**📝 รายละเอียดรายการที่ถูกยกเลิก:**\n"
                         f"• **วันที่ลา:** {dr}\n"
                         f"• **ประเภทการลา:** {old_data.get('leave_category', 'ทั่วไป')}\n"
                         f"• **จำนวนวัน:** {old_data.get('total_days', 1)} วัน\n"
                         f"• **เหตุผลเดิม:** {old_data.get('reason', '-')}\n\n"
-                        f"**🛑 หมายเหตุจากแอดมิน:**\n> {self.reason.value}\n\n"  # เปลี่ยนหัวข้อตรงนี้
+                        f"**🛑 หมายเหตุจากแอดมิน:** {self.reason.value}\n\n"
                         f"{LONG_SEP}"
                     )
+                    # ... (ส่วนส่งข้อความและ Footer คงเดิม) ...
                     log_em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M:%S')}")
                     await log_ch.send(embed=log_em)
             
@@ -865,7 +867,8 @@ class ConfirmCancelView(discord.ui.View):
         self.target_idx, self.od = target_idx, od
     @discord.ui.button(label="✅ ยืนยันการยกเลิก", style=discord.ButtonStyle.success)
     async def confirm(self, it, b):
-        await it.response.send_modal(CancelReasonModal(self.target_idx, self.od))
+        # ส่งค่า False (หรือปล่อยว่าง) เพื่อบอกว่าเป็นรายการจากสมาชิกปกติ[cite: 3]
+        await it.response.send_modal(CancelReasonModal(self.target_idx, self.od, is_admin_request=False))
     @discord.ui.button(label="❌ ไม่ยกเลิกแล้ว", style=discord.ButtonStyle.danger)
     async def cancel(self, it, b):
         await it.response.defer()
