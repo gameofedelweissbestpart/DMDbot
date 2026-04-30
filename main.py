@@ -614,7 +614,7 @@ class AdminEditDetailsModal(discord.ui.Modal):
                         f"• **ประเภทการลา:** {cat_log}\n"
                         f"• **จำนวนวัน:** {days_log}\n"
                         f"• **เหตุผล:** {reason_log}\n\n"
-                        f"**🛑 หมายเหตุจากแอดมิน:**\n> {admin_note}\n\n"
+                        f"**🛑 หมายเหตุจากแอดมิน:**\n • {admin_note}\n\n"
                         f"{LONG_SEP}"
                     )
                     em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M:%S')}")
@@ -816,35 +816,26 @@ class CancelReasonModal(discord.ui.Modal):
             cfg = load_json(CONFIG_PATH, {})
             log_ch_id = cfg.get("log_ch")
             if log_ch_id:
+                # ปรับปรุงการหาห้อง Log[cite: 3]
                 log_ch = bot.get_channel(int(log_ch_id))
+                if not log_ch:
+                    try: log_ch = await bot.fetch_channel(int(log_ch_id))
+                    except: log_ch = None
+
                 if log_ch:
                     u_id = str(it.user.id)
-                    # เช็คว่ามี Role แอดมินหรือไม่
                     has_admin_role = any(r.name in ["Admin", "ผู้ดูแล"] for r in it.user.roles)
-                    
-                    # เช็คว่าคนกดคือเจ้าของใบลา หรือเป็นคนแจ้งลาใบนี้หรือไม่
                     is_involved = u_id == old_data['target_id'] or u_id == old_data['user_id']
-                    
-                    # จะถือว่าเป็น "การกระทำของแอดมิน" ก็ต่อเมื่อ มี Role และไม่ได้เกี่ยวข้องกับใบลาใบนั้น
                     is_admin_action = has_admin_role and not is_involved
                     
-                    # ตั้งค่าสีและหัวข้อ
                     log_title = "📌 บันทึกการยกเลิกโดยผู้ดูแล" if is_admin_action else "📌 บันทึกยกเลิกการแจ้งลา"
                     log_color = 0xe67e22 if is_admin_action else 0xe74c3c 
                     
                     target_member = it.guild.get_member(int(old_data['target_id']))
                     target_name = target_member.display_name if target_member else old_data['name']
-                    executor_name = it.user.display_name
                     
                     log_em = discord.Embed(title=log_title, color=log_color)
-                    
-                    # จัดการข้อความผู้ดำเนินการ
-                    on_behalf = ""
-                    if is_admin_action:
-                        on_behalf = f"\n**👮 ผู้ดำเนินการ:** {executor_name} (Admin)"
-                    elif u_id != old_data['target_id']:
-                        # กรณีแอดมินยกเลิกใบลาที่ตัวเองแจ้งแทน หรือเพื่อนปกติยกเลิกที่ตัวเองแจ้งแทน
-                        on_behalf = f"\n**👤 ผู้ดำเนินการ:** {executor_name} (ผู้แจ้งลาแทน)"
+                    on_behalf = f"\n**👮 ผู้ดำเนินการ:** {it.user.display_name} (Admin)" if is_admin_action else ""
                     
                     dr = old_data['start_date'] if old_data['start_date'] == old_data['end_date'] else f"{old_data['start_date']} - {old_data['end_date']}"
                     log_em.description = (
@@ -860,10 +851,8 @@ class CancelReasonModal(discord.ui.Modal):
             
             await it.edit_original_response(content=f"❌ ยกเลิกรายการแจ้งลาเรียบร้อยแล้ว!", view=None)
             await asyncio.sleep(3)
-            try:
-                await it.delete_original_response()
-            except:
-                pass
+            try: await it.delete_original_response()
+            except: pass
 
 class ConfirmCancelView(discord.ui.View):
     def __init__(self, target_idx, od):
