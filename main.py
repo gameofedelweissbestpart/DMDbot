@@ -397,9 +397,9 @@ class AdminPanelView(discord.ui.View):
     # ... ปุ่มอื่นๆ (ล้างข้อมูล, แก้ไขใบลา) ด้านล่างนี้ให้ปล่อยไว้เหมือนเดิม ...
     
     # กฎข้อที่ 13: ปุ่มล้างข้อมูลทั้งหมด
-    @discord.ui.button(label="🗑️ ล้างข้อมูลใบลา (รายสัปดาห์)", style=discord.ButtonStyle.danger, custom_id="admin_clear_leave")
+    @discord.ui.button(label="🗑️ ล้างข้อมูลใบลา", style=discord.ButtonStyle.danger, custom_id="admin_clear_leave")
     async def clear_data(self, it, b):
-        txt = "⚠️ **คุณยืนยันที่จะล้างข้อมูลใบลาทั้งหมดใช่หรือไม่?**\nการกระทำนี้จะลบข้อมูลถาวรและส่งไฟล์ Backup ให้แอดมินทุกคน"
+        txt = "⚠️ **คุณยืนยันที่จะล้างข้อมูลใบลาย้อนหลัง 30วัน ใช่หรือไม่?**\nการกระทำนี้จะลบข้อมูลถาวรและส่งไฟล์ Backup ให้แอดมินทุกคน"
         await it.response.send_message(content=txt, view=ConfirmClearView(), ephemeral=True)
 
 # --- 5. งานรายวัน และ รายสัปดาห์ (Auto Cleanup 30 วัน + รายสัปดาห์คลีน) ---
@@ -849,6 +849,7 @@ class EditLeaveSelect(discord.ui.Select):
 class LeaveMainView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
+        
     @discord.ui.button(label="📝 แจ้งลา", style=discord.ButtonStyle.success, custom_id="v_l_final_vMaster_DMD_master_1")
     async def l_me(self, it, b):
         await it.response.send_message("🤔 ลาช่วงไหน:", view=SubMenuView(it, DateSelect()), ephemeral=True)
@@ -861,13 +862,15 @@ class LeaveMainView(discord.ui.View):
     async def l_cn(self, it, b):
         d = load_json(DB_LEAVE, [])
         u_id, now_date, opts = str(it.user.id), get_thai_time().date(), []
-        is_admin = any(r.name in ["Admin", "ผู้ดูแล"] for r in it.user.roles)
         
+        # ตัดบรรทัด is_admin ออก และปรับเงื่อนไขการกรองใหม่
         for i, e in enumerate(d):
-            if is_admin or e['user_id'] == u_id or e['target_id'] == u_id:
+            # เงื่อนไขใหม่: แสดงเฉพาะใบลาที่ตนเองมีส่วนเกี่ยวข้องเท่านั้น
+            if e['user_id'] == u_id or e['target_id'] == u_id:
                 try:
                     if datetime.strptime(e['end_date'], "%d/%m/%Y").date() < now_date: continue
                 except: continue
+                
                 target_member = it.guild.get_member(int(e['target_id']))
                 tn = target_member.display_name if target_member else e['name']
                 dr = e['start_date'] if e['start_date'] == e['end_date'] else f"{e['start_date']} - {e['end_date']}"
@@ -877,21 +880,23 @@ class LeaveMainView(discord.ui.View):
                     description=f"ประเภท: {e.get('leave_category','ทั่วไป')} | เหตุผล: {e.get('reason','-')[:20]}...",
                     value=str(i)
                 ))
-        if not opts: return await it.response.send_message("❌ ไม่พบรายการที่จะยกเลิก", ephemeral=True)
-        await it.response.send_message("📋 เลือกใบลาที่จะยกเลิก:", view=SubMenuView(it, CancelSelect(opts[:25])), ephemeral=True)
-
-    
+        
+        if not opts: return await it.response.send_message("❌ ไม่พบรายการที่คุณสามารถยกเลิกได้", ephemeral=True)
+        await it.response.send_message("📋 เลือกใบลาของคุณที่จะยกเลิก:", view=SubMenuView(it, CancelSelect(opts[:25])), ephemeral=True)
+  
     @discord.ui.button(label="✏️ แก้ไขวันสิ้นสุดการลา", style=discord.ButtonStyle.secondary, custom_id="v_l_final_vMaster_DMD_master_4")
     async def l_ed(self, it, b):
         d = load_json(DB_LEAVE, [])
         u_id, now_date, opts = str(it.user.id), get_thai_time().date(), []
-        is_admin = any(r.name in ["Admin", "ผู้ดูแล"] for r in it.user.roles)
 
+        # ทำเช่นเดียวกันกับปุ่มแก้ไข: ตัดสิทธิ์แอดมินในการเห็นใบลาคนอื่นออก
         for i, e in enumerate(d):
-            if (is_admin or e['user_id'] == u_id or e['target_id'] == u_id) and e['start_date'] != e['end_date']:
+            # เงื่อนไข: ต้องมีส่วนเกี่ยวข้อง และเป็นการลามากกว่า 1 วัน
+            if (e['user_id'] == u_id or e['target_id'] == u_id) and e['start_date'] != e['end_date']:
                 try:
                     if datetime.strptime(e['end_date'], "%d/%m/%Y").date() < now_date: continue
                 except: continue
+                
                 target_member = it.guild.get_member(int(e['target_id']))
                 tn = target_member.display_name if target_member else e['name']
                 dr = e['start_date'] if e['start_date'] == e['end_date'] else f"{e['start_date']} - {e['end_date']}"
@@ -901,8 +906,9 @@ class LeaveMainView(discord.ui.View):
                     description=f"ประเภท: {e.get('leave_category','ทั่วไป')} | เหตุผล: {e.get('reason','-')[:20]}...",
                     value=str(i)
                 ))
-        if not opts: return await it.response.send_message("❌ ไม่พบรายการที่สามารถแก้ไขได้ (ต้องเป็นการลาหลายวัน)", ephemeral=True)
-        await it.response.send_message("✏️ เลือกใบลาที่จะแก้:", view=SubMenuView(it, EditLeaveSelect(opts[:25], it)), ephemeral=True)   
+        
+        if not opts: return await it.response.send_message("❌ ไม่พบรายการที่คุณสามารถแก้ไขได้", ephemeral=True)
+        await it.response.send_message("✏️ เลือกใบลาของคุณที่จะแก้ไข:", view=SubMenuView(it, EditLeaveSelect(opts[:25], it)), ephemeral=True)   
 
 
 class FriendSelect(discord.ui.UserSelect):
