@@ -57,6 +57,7 @@ class RealtimeRefreshView(discord.ui.View):
         await it.delete_original_response()
 
 # --- 2. ระบบตาราง Real-time (ปรับหัวข้อตามสั่ง) ---
+# --- 2. ระบบตาราง Real-time (อัปเดต: นับจำนวนคนลาแบบไม่ซ้ำ) ---
 async def update_summary_board():
     cfg = load_json(CONFIG_PATH, {})
     ch_id = cfg.get("realtime_ch")
@@ -69,17 +70,18 @@ async def update_summary_board():
     data = load_json(DB_LEAVE, [])
     now = get_thai_time().date()
     active = []
+    unique_users = set() # ใช้ set เก็บ ID เพื่อไม่ให้เกิดค่าซ้ำ
     
     for e in data:
         try:
             start_dt = datetime.strptime(e['start_date'], "%d/%m/%Y").date()
             end_dt = datetime.strptime(e['end_date'], "%d/%m/%Y").date()
             if start_dt <= now <= end_dt:
-                active.append(e)
+                active.append(e) # เก็บทุกรายการเพื่อโชว์รายละเอียดปกติ
+                unique_users.add(e['target_id']) # บันทึก ID สมาชิกที่ลา (ซ้ำก็นับเป็น 1)
         except:
             continue
 
-    # ปรับหัวข้อตามสั่ง: ตัด "ของวันนี้" ออก และใช้หัวข้อนี้เสมอ
     desc = f"# 📋 รายชื่อสมาชิกที่แจ้งลา (Real-time)\n{LONG_SEP}\n\n"
     em = discord.Embed(description=desc, color=0x2B2D31)
     
@@ -87,7 +89,6 @@ async def update_summary_board():
         desc += "> 🍃 **ขณะนี้ยังไม่มีสมาชิกแจ้งลาในระบบ**\n\n"
     else:
         for e in active:
-            # ใช้แท็กชื่อสมาชิก <@ID>
             desc += f"🔹 <@{e['target_id']}> `[{e.get('leave_category','ทั่วไป')}]`\n"
             dr = e['start_date'] if e['start_date'] == e['end_date'] else f"{e['start_date']} - {e['end_date']}"
             desc += f"└ **วันที่ลา:** {dr} `(รวม {e['total_days']} วัน)`\n"
@@ -97,22 +98,22 @@ async def update_summary_board():
             desc += "\n"
         
     desc += f"{LONG_SEP}\n"
-    desc += f"**📊 สรุปจำนวนคนลาวันนี้: {len(active)} คน**\n"
+    # เปลี่ยนมานับจำนวนจาก unique_users แทน active
+    desc += f"**📊 สรุปจำนวนคนลาวันนี้: {len(unique_users)} คน**\n"
     desc += f"**📅 อัปเดตล่าสุด: {get_thai_time().strftime('%d/%m/%Y %H:%M น.')}**"
     em.description = desc
 
     target = None
     async for m in channel.history(limit=50):
         if m.author == bot.user and m.embeds and len(m.embeds) > 0:
-            # ค้นหาข้อความเดิมจากหัวข้อใหม่
             if m.embeds[0].description and "รายชื่อสมาชิกที่แจ้งลา (Real-time)" in m.embeds[0].description:
                 target = m
                 break
     
     if target:
-        await target.edit(embed=em, view=RealtimeRefreshView()) # ใส่ปุ่มเข้าไป
+        await target.edit(embed=em, view=RealtimeRefreshView())
     else:
-        await channel.send(embed=em, view=RealtimeRefreshView()) # ใส่ปุ่มเข้าไป
+        await channel.send(embed=em, view=RealtimeRefreshView())
 
 # --- 3. ระบบแจ้งลาและ Log (บังคับ ค.ศ. / ลาไม่เกิน 15 วัน / แยกสี Log) ---
 class LeaveModal(discord.ui.Modal):
@@ -364,7 +365,7 @@ class CategorySelectionView(discord.ui.View):
         super().__init__(timeout=None)
 
     # 2. ตรวจสอบว่าปุ่มมี custom_id ที่แน่นอน
-    @discord.ui.button(label="📝 ระบบแจ้งลา", style=discord.ButtonStyle.primary, emoji="📋", custom_id="setup_leave_system")
+    @discord.ui.button(label="📝 ระบบแจ้งลา", style=discord.ButtonStyle.primary, custom_id="setup_leave_system")
     async def leave_system_setup(self, it: discord.Interaction, button: discord.ui.Button):
         opts = [
             discord.SelectOption(label="📝 ห้องปุ่มแจ้งลา", value="leave_ch"),
@@ -376,7 +377,7 @@ class CategorySelectionView(discord.ui.View):
         # เมื่อเปลี่ยนหน้าเมนู แนะนำให้ใช้ View ใหม่ที่รองรับ Persistent เช่นกัน
         await it.response.edit_message(content="🛠 **ระบบแจ้งลา:** เลือกหัวข้อที่ต้องการตั้งค่า:", view=SubMenuView(it, AdminCatSelect(opts)))
 
-    @discord.ui.button(label="💰 ระบบแจ้งปรับเงิน", style=discord.ButtonStyle.danger, emoji="💸", custom_id="setup_fine_system")
+    @discord.ui.button(label="💰 ระบบแจ้งปรับเงิน", style=discord.ButtonStyle.primary, custom_id="setup_fine_system")
     async def fine_system_setup(self, it: discord.Interaction, button: discord.ui.Button):
         opts = [
             discord.SelectOption(label="📋 แจ้งค่าปรับ Real-time", value="fine_realtime_ch"),
@@ -384,6 +385,14 @@ class CategorySelectionView(discord.ui.View):
             discord.SelectOption(label="✅ อนุมัติการชำระเงิน", value="fine_approve_ch"),
         ]
         await it.response.edit_message(content="🛠 **ระบบแจ้งปรับเงิน:** เลือกหัวข้อที่ต้องการตั้งค่า:", view=SubMenuView(it, AdminCatSelect(opts)))
+
+    @discord.ui.button(label="ปิดเมนู", style=discord.ButtonStyle.danger, custom_id="admin_close_setup_category")
+    async def close_menu(self, it: discord.Interaction, button: discord.ui.Button):
+        try:
+            await it.response.defer()
+            await it.delete_original_response()
+        except:
+            pass    
 
 class AdminPanelView(discord.ui.View):
     def __init__(self):
@@ -402,15 +411,8 @@ class AdminPanelView(discord.ui.View):
             view=AdminLeaveManagementView(), 
             ephemeral=True
         ) # <--- ตรวจสอบวงเล็บปิดตรงนี้ ต้องมีวงเล็บปิดครอบพารามิเตอร์ทั้งหมด    
-    
-    # กฎข้อที่ 13: ปุ่มล้างข้อมูลทั้งหมด
-    @discord.ui.button(label="🗑️ ล้างข้อมูลใบลา", style=discord.ButtonStyle.danger, custom_id="admin_clear_leave")
-    async def clear_data(self, it, b):
-        txt = "⚠️ **คุณยืนยันที่จะล้างข้อมูลใบลาย้อนหลัง 30วัน ใช่หรือไม่?**\nการกระทำนี้จะลบข้อมูลถาวรและส่งไฟล์ Backup ให้แอดมินทุกคน"
-        await it.response.send_message(content=txt, view=ConfirmClearView(), ephemeral=True)
 
 # --- 4. ส่วน Admin (ระบบจัดการใบลาแบบ 2-Step สมบูรณ์) ---
-
 class AdminLeaveManagementView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -444,7 +446,7 @@ class AdminLeaveManagementView(discord.ui.View):
             view=SubMenuView(it, AdminActionSelect(opts[:25]))
         )
 
-    @discord.ui.button(label="🗑️ ล้างข้อมูลใบลา (30 วัน)", style=discord.ButtonStyle.danger, custom_id="admin_cleanup_trigger_v2")
+    @discord.ui.button(label="🗑️ ล้างข้อมูลใบลา (30 วัน)", style=discord.ButtonStyle.primary, custom_id="admin_cleanup_trigger_v2")
     async def cleanup(self, it: discord.Interaction, b):
         txt = "⚠️ **คุณยืนยันที่จะ Cleanup ข้อมูลใบลาที่เก่ากว่า 1 เดือนใช่หรือไม่?**\nระบบจะส่งไฟล์ Backup ให้แอดมินทุกคนก่อนดำเนินการ"
         await it.response.send_message(content=txt, view=ConfirmClearView(), ephemeral=True)
@@ -615,7 +617,7 @@ class AdminEditDetailsModal(discord.ui.Modal):
                         f"• **ประเภทการลา:** {cat_log}\n"
                         f"• **จำนวนวัน:** {days_log}\n"
                         f"• **เหตุผล:** {reason_log}\n\n"
-                        f"**🛑 หมายเหตุจากแอดมิน:** • {admin_note}\n\n"
+                        f"**🛑 หมายเหตุจากแอดมิน:** {admin_note}\n\n"
                         f"{LONG_SEP}"
                     )
                     em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M:%S')}")
