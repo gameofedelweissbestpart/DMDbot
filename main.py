@@ -170,22 +170,28 @@ class LeaveModal(discord.ui.Modal):
         save_json(DB_LEAVE, d)
         await update_summary_board()
         
+        # --- ส่วนที่ปรับปรุงใน LeaveModal.on_submit ---
         cfg = load_json(CONFIG_PATH, {})
         log_ch_id = cfg.get("log_ch")
         if log_ch_id:
             log_ch = bot.get_channel(int(log_ch_id))
             if log_ch:
-                # แยก Log ตามประเภท (แจ้งเองสีเขียว / แจ้งแทนเพื่อนสีฟ้า)
+                # ดึงข้อมูล Member เพื่อเอา Display Name
+                target_m = it.guild.get_member(int(target_uid))
+                target_name = target_m.display_name if target_m else f"ID: {target_uid}"
+                
                 is_on_behalf = True if self.t_id and self.t_id != str(it.user.id) else False
                 log_title = "📌 บันทึกการแจ้งลาแทนเพื่อน" if is_on_behalf else "📌 บันทึกการแจ้งลาใหม่"
                 log_color = 0x3498db if is_on_behalf else 0x2ecc71
                 
                 log_em = discord.Embed(title=log_title, color=log_color)
-                on_behalf_txt = f"\n**👮 ผู้แจ้งลาแทน:** <@{it.user.id}>" if is_on_behalf else ""
+                
+                # ใช้ชื่อเล่นแทนการ Mention
+                on_behalf_txt = f"\n**👮 ผู้แจ้งลาแทน:** {it.user.display_name}" if is_on_behalf else ""
                 dr = s if s == e else f"{s} - {e}"
                 
                 log_em.description = (
-                    f"**👤 สมาชิกที่ลา:** <@{target_uid}>{on_behalf_txt}\n\n"
+                    f"**👤 สมาชิกที่ลา:** {target_name}{on_behalf_txt}\n\n"
                     f"**📝 ประเภท:** {self.cat_val}\n"
                     f"**📅 วันที่ลา:** {dr} `(รวม {days} วัน)`\n"
                     f"**💬 เหตุผล:** {self.re.value}\n\n"
@@ -193,14 +199,6 @@ class LeaveModal(discord.ui.Modal):
                 )
                 log_em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M')} น.")
                 await log_ch.send(embed=log_em)
-        
-        # แก้บั๊ก: เพิ่มข้อความตอบกลับสำเร็จ และหายเองใน 3 วิ
-        await it.response.send_message(content='✅ ระบบบันทึกใบลาของคุณเรียบร้อยแล้ว!', ephemeral=True)
-        await asyncio.sleep(3)
-        try:
-            await it.delete_original_response()
-        except:
-            pass
 
 class RetryView(discord.ui.View):
     def __init__(self, title, s, e, cat, t_id, is_f, re_val):
@@ -549,39 +547,50 @@ class CancelReasonModal(discord.ui.Modal):
         await it.response.defer(ephemeral=True)
         d = load_json(DB_LEAVE, [])
         if 0 <= self.target_idx < len(d):
-            d.pop(self.target_idx)
+            old_data = d.pop(self.target_idx)
             save_json(DB_LEAVE, d)
             await update_summary_board()
+            
             cfg = load_json(CONFIG_PATH, {})
             log_ch_id = cfg.get("log_ch")
             if log_ch_id:
                 log_ch = bot.get_channel(int(log_ch_id))
                 if log_ch:
-                    log_em = discord.Embed(title="📌 บันทึกยกเลิกการแจ้งลา", color=0xe74c3c)
+                    is_admin = any(r.name in ["Admin", "ผู้ดูแล"] for r in it.user.roles)
+                    log_title = "📌 บันทึกการยกเลิกโดยผู้ดูแล" if is_admin else "📌 บันทึกยกเลิกการแจ้งลา"
+                    log_color = 0xe67e22 if is_admin else 0xe74c3c 
                     
-                    # กฎข้อที่ 11: เช็กชื่อผู้ยกเลิกแทนจากเจ้าของใบลา
-                    is_on_behalf = str(it.user.id) != self.od['target_id']
-                    on_behalf = f"\n**👮 ผู้ยกเลิกแทน:** <@{it.user.id}>" if is_on_behalf else ""
-                    dr = self.od['start_date'] if self.od['start_date'] == self.od['end_date'] else f"{self.od['start_date']} - {self.od['end_date']}"
+                    # ใช้ชื่อเล่น (Display Name) และไม่ Mention
+                    target_member = it.guild.get_member(int(old_data['target_id']))
+                    target_name = target_member.display_name if target_member else old_data['name']
+                    executor_name = it.user.display_name
                     
-                    # ปรับ Log: ใช้ "วันที่ลา" และลบบรรทัดสถานะ
+                    log_em = discord.Embed(title=log_title, color=log_color)
+                    on_behalf = ""
+                    if is_admin:
+                        on_behalf = f"\n**👮 ผู้ดำเนินการ:** {executor_name} (Admin)"
+                    elif str(it.user.id) != old_data['target_id']:
+                        on_behalf = f"\n**👤 ผู้ดำเนินการ:** {executor_name} (ผู้แจ้งลาแทน)"
+                    
+                    dr = old_data['start_date'] if old_data['start_date'] == old_data['end_date'] else f"{old_data['start_date']} - {old_data['end_date']}"
                     log_em.description = (
-                        f"**👤 สมาชิกที่ลา:** <@{self.od['target_id']}>{on_behalf}\n\n"
-                        f"**📝 ประเภท:** {self.od.get('leave_category', 'ทั่วไป')}\n"
-                        f"**📅 วันที่ลา:** {dr} `(รวม {self.od.get('total_days', 1)} วัน)`\n"
-                        f"**💬 เหตุผลเดิมที่แจ้ง:** {self.od.get('reason', '-')}\n"
+                        f"**👤 สมาชิกที่ลา:** {target_name}{on_behalf}\n\n"
+                        f"**📝 ประเภท:** {old_data.get('leave_category', 'ทั่วไป')}\n"
+                        f"**📅 วันที่ลา:** {dr} `(รวม {old_data.get('total_days', 1)} วัน)`\n"
+                        f"**💬 เหตุผลเดิมที่แจ้ง:** {old_data.get('reason', '-')}\n"
                         f"**🛑 เหตุผลที่ยกเลิก:** {self.reason.value}\n\n"
                         f"{LONG_SEP}"
                     )
                     log_em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M')} น.")
                     await log_ch.send(embed=log_em)
             
+            # ตอบกลับลับและหายไปใน 3 วิ
             await it.edit_original_response(content=f"❌ ยกเลิกรายการแจ้งลาเรียบร้อยแล้ว!", view=None)
-        await asyncio.sleep(3)
-        try:
-            await it.delete_original_response()
-        except:
-            pass
+            await asyncio.sleep(3)
+            try:
+                await it.delete_original_response()
+            except:
+                pass
 
 class ConfirmCancelView(discord.ui.View):
     def __init__(self, target_idx, od):
@@ -619,7 +628,7 @@ async def process_edit_leave(it, idx, od, new_end_str, edit_reason="-"):
         old_days = (datetime.strptime(old_e, "%d/%m/%Y") - datetime.strptime(od['start_date'], "%d/%m/%Y")).days + 1
         new_days = (datetime.strptime(new_end_str, "%d/%m/%Y") - datetime.strptime(od['start_date'], "%d/%m/%Y")).days + 1
         diff = new_days - old_days
-        diff_txt = f"เพิ่มขึ้น {diff} วัน" if diff > 0 else f"ลดลง {abs(diff)} วัน" if diff < 0 else "จำนวนวันเท่าเดิม"
+        diff_txt = f"เพิ่มขึ้น {diff} วัน" if diff > 0 else f"ลดลง {abs(diff)} วัน" if diff < 0 else "เท่าเดิม"
 
         d[idx]['end_date'] = new_end_str
         d[idx]['total_days'] = new_days
@@ -631,14 +640,27 @@ async def process_edit_leave(it, idx, od, new_end_str, edit_reason="-"):
         if log_ch_id:
             log_ch = bot.get_channel(int(log_ch_id))
             if log_ch:
-                log_em = discord.Embed(title="📌 บันทึกการแก้ไขวันสิ้นสุดการลา", color=0x95a5a6)
-                on_behalf = f"\n**👮 ผู้แจ้งแก้ไขแทน:** <@{it.user.id}>" if od['target_id'] != str(it.user.id) else ""
+                is_admin = any(r.name in ["Admin", "ผู้ดูแล"] for r in it.user.roles)
+                log_title = "📌 บันทึกการแก้ไขโดยผู้ดูแล" if is_admin else "📌 บันทึกการแก้ไขวันสิ้นสุดการลา"
+                log_color = 0xe67e22 if is_admin else 0x95a5a6
+                
+                # ใช้ชื่อเล่น (Display Name) และไม่ Mention
+                target_member = it.guild.get_member(int(od['target_id']))
+                target_name = target_member.display_name if target_member else od['name']
+                executor_name = it.user.display_name
+                
+                log_em = discord.Embed(title=log_title, color=log_color)
+                on_behalf = ""
+                if is_admin:
+                    on_behalf = f"\n**👮 ผู้แจ้งแก้ไขแทน:** {executor_name} (Admin)"
+                elif od['target_id'] != str(it.user.id):
+                    on_behalf = f"\n**👤 ผู้แจ้งแก้ไขแทน:** {executor_name} (ผู้แจ้งลาแทน)"
                 
                 log_em.description = (
-                    f"**👤 สมาชิกที่ลา:** <@{od['target_id']}>{on_behalf}\n\n"
+                    f"**👤 สมาชิกที่ลา:** {target_name}{on_behalf}\n\n"
                     f"**📝 ประเภท:** {od.get('leave_category', 'ทั่วไป')}\n"
-                    f"**📅 วันที่ลาเดิม:** {od['start_date']} - {old_e} `(รวม {old_days} วัน)`\n"
-                    f"**📅 วันที่ลาใหม่:** {od['start_date']} - {new_end_str} `(รวม {new_days} วัน)`\n"
+                    f"**📅 วันที่ลาเดิม:** {od['start_date']} - {old_e} `({old_days} วัน)`\n"
+                    f"**📅 วันที่ลาใหม่:** {od['start_date']} - {new_end_str} `({new_days} วัน)`\n"
                     f"**📈 การเปลี่ยนแปลง:** `{diff_txt}`\n"
                     f"**💬 เหตุผลเดิมที่แจ้ง:** {od.get('reason', '-')}\n"
                     f"**🛑 เหตุผลที่ขอแก้ไข:** {edit_reason}\n\n"
@@ -647,6 +669,7 @@ async def process_edit_leave(it, idx, od, new_end_str, edit_reason="-"):
                 log_em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M')} น.")
                 await log_ch.send(embed=log_em)
         
+        # ตอบกลับลับและหายไปใน 3 วิ
         await it.edit_original_response(content=f"✏️ แก้ไขข้อมูลการลาเรียบร้อยแล้ว!", embed=None, view=None)
         await asyncio.sleep(3)
         try:
