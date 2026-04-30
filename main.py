@@ -409,30 +409,29 @@ class AdminPanelView(discord.ui.View):
         txt = "⚠️ **คุณยืนยันที่จะล้างข้อมูลใบลาย้อนหลัง 30วัน ใช่หรือไม่?**\nการกระทำนี้จะลบข้อมูลถาวรและส่งไฟล์ Backup ให้แอดมินทุกคน"
         await it.response.send_message(content=txt, view=ConfirmClearView(), ephemeral=True)
 
-# --- วางต่อจาก class AdminPanelView ---
+# --- 4. ส่วน Admin (ระบบจัดการใบลาแบบ 2-Step สมบูรณ์) ---
+
 class AdminLeaveManagementView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None) # ตั้งค่าให้ปุ่มไม่หมดอายุ
+        super().__init__(timeout=None)
 
-    @discord.ui.button(label="⚙️ จัดการใบลาทั้งหมด", style=discord.ButtonStyle.primary, custom_id="admin_manage_all_leaves")
+    @discord.ui.button(label="⚙️ จัดการใบลาทั้งหมด", style=discord.ButtonStyle.primary, custom_id="admin_manage_all_leaves_v2")
     async def manage_all(self, it: discord.Interaction, b):
         d = load_json(DB_LEAVE, [])
         now_date = get_thai_time().date()
         opts = []
         
-        # ดึงใบลาของทุกคนมาแสดง (สิทธิ์แอดมิน)
         for i, e in enumerate(d):
             try:
                 if datetime.strptime(e['end_date'], "%d/%m/%Y").date() < now_date: continue
             except: continue
             
-            # ดึงชื่อเล่นมาแสดงในเมนู Dropdown
             target_m = it.guild.get_member(int(e['target_id']))
             tn = target_m.display_name if target_m else e['name']
             dr = e['start_date'] if e['start_date'] == e['end_date'] else f"{e['start_date']} - {e['end_date']}"
             
             opts.append(discord.SelectOption(
-                label=f"{tn} | {dr}", # แสดงผลเป็น "ชื่อเล่น | วันที่ลา"[cite: 2]
+                label=f"{tn} | {dr}",
                 description=f"โดย: {it.guild.get_member(int(e['user_id'])).display_name if it.guild.get_member(int(e['user_id'])) else 'ระบบ'}",
                 value=str(i)
             ))
@@ -440,20 +439,22 @@ class AdminLeaveManagementView(discord.ui.View):
         if not opts: 
             return await it.response.send_message("🍃 **ขณะนี้ไม่มีรายการใบลาที่กำลังดำเนินการอยู่**", ephemeral=True)
             
-        # ส่งเมนูเลือกใบลาไปให้แอดมิน
-        await it.response.send_message("🛠 **แอดมินจัดการใบลา:** เลือกรายการที่ต้องการจัดการ:", 
-                                       view=SubMenuView(it, AdminActionSelect(opts[:25])), ephemeral=True)
+        await it.response.edit_message(
+            content="🛠 **แอดมินจัดการใบลา:** เลือกรายการที่ต้องการจัดการ:", 
+            view=SubMenuView(it, AdminActionSelect(opts[:25]))
+        )
 
-    @discord.ui.button(label="🗑️ ล้างข้อมูลใบลา (30 วัน)", style=discord.ButtonStyle.danger, custom_id="admin_cleanup_trigger")
+    @discord.ui.button(label="🗑️ ล้างข้อมูลใบลา (30 วัน)", style=discord.ButtonStyle.danger, custom_id="admin_cleanup_trigger_v2")
     async def cleanup(self, it: discord.Interaction, b):
-        # เรียกใช้ ConfirmClearView ที่คุณมีอยู่แล้ว
         txt = "⚠️ **คุณยืนยันที่จะ Cleanup ข้อมูลใบลาที่เก่ากว่า 1 เดือนใช่หรือไม่?**\nระบบจะส่งไฟล์ Backup ให้แอดมินทุกคนก่อนดำเนินการ"
         await it.response.send_message(content=txt, view=ConfirmClearView(), ephemeral=True)
 
-    @discord.ui.button(label="🔙 ย้อนกลับ", style=discord.ButtonStyle.secondary, custom_id="admin_back_to_main")
-    async def back(self, it: discord.Interaction, b):
-        # กลับไปหน้าหลักของ Admin Panel โดยการ edit ข้อความเดิม
-        await it.response.edit_message(content="🕹 **Dark Monday Admin Panel**", view=AdminPanelView())
+    @discord.ui.button(label="ปิดเมนู", style=discord.ButtonStyle.danger, custom_id="admin_close_leave_system_v2")
+    async def close_menu(self, it: discord.Interaction, b):
+        try:
+            await it.response.defer()
+            await it.delete_original_response()
+        except: pass
 
 class AdminActionSelect(discord.ui.Select):
     def __init__(self, opts):
@@ -464,7 +465,6 @@ class AdminActionSelect(discord.ui.Select):
         d = load_json(DB_LEAVE, [])
         if 0 <= idx < len(d):
             od = d[idx]
-            # แสดงชื่อสมาชิกผ่านการ Mention ซึ่ง Discord จะแสดงเป็น Display Name
             em = discord.Embed(title="⚙️ เมนูจัดการสำหรับผู้ดูแล", color=0xe67e22)
             em.description = (f"**👤 สมาชิก:** <@{od['target_id']}>\n"
                               f"**📅 วันที่:** {od['start_date']} - {od['end_date']}\n"
@@ -478,137 +478,121 @@ class AdminFinalActionView(discord.ui.View):
         super().__init__(timeout=None)
         self.idx, self.od = idx, od
 
-    @discord.ui.button(label="✏️ แก้ไขวันสิ้นสุด", style=discord.ButtonStyle.primary)
-    async def edit(self, it, b):
-        # เรียกใช้เมนูแก้ไขวันลาที่มีอยู่แล้วในโค้ดของคุณ[cite: 3]
-        await it.response.edit_message(content="📅 **เลือกวันที่สิ้นสุดใหม่ (Admin):**", embed=None, view=SubMenuView(it, EditDateSelect(self.idx, self.od, it)))
-
-    @discord.ui.button(label="📝 แก้ไขประเภท/เหตุผล", style=discord.ButtonStyle.secondary, custom_id="admin_edit_details")
+    @discord.ui.button(label="📝 แก้ไขข้อมูลใบลา", style=discord.ButtonStyle.secondary, custom_id="admin_edit_master_btn")
     async def edit_details(self, it, b):
-        # เรียกใช้ Modal สำหรับการแก้ไขแบบละเอียด (Super Admin) ที่เราเพิ่งสร้างไป
-        await it.response.send_modal(AdminEditDetailsModal(self.idx, self.od))
+        categories = ["ลาพีคไทม์", "ลาแอร์ดรอป 21:00 น.", "ลาแอร์ดรอป 00:00 น.", "ลาอีเธอร์ยักษ์", "ลาสกายฟอล", "ลาซ้อม", "ลาอื่นๆ (ระบุในเหตุผลการลา)"]
+        opts = [discord.SelectOption(label=f"คงประเภทเดิม: {self.od.get('leave_category', 'ทั่วไป')}", value="KEEP_OLD", emoji="📌")]
+        for cat in categories:
+            opts.append(discord.SelectOption(label=cat, value=cat, emoji="📝"))
+            
+        await it.response.edit_message(
+            content="🎯 **ขั้นตอนที่ 1:** เลือกประเภทการลาที่ต้องการ (หรือใช้ค่าเดิม)", 
+            embed=None, 
+            view=AdminEditCategoryView(self.idx, self.od, opts)
+        )
 
-    @discord.ui.button(label="🛑 ยกเลิกใบลานี้", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="🛑 ยกเลิกใบลานี้", style=discord.ButtonStyle.danger, custom_id="admin_cancel_leave_btn")
     async def cancel(self, it, b):
         await it.response.send_modal(CancelReasonModal(self.idx, self.od))
 
-    # --- ปุ่มย้อนกลับที่เพิ่มเข้ามาใหม่ ---
-    @discord.ui.button(label="🔙 ย้อนกลับ", style=discord.ButtonStyle.secondary, custom_id="admin_back_to_select_leave", row=1)
+    @discord.ui.button(label="🔙 ย้อนกลับ", style=discord.ButtonStyle.secondary, custom_id="admin_back_to_select_leave_btn", row=1)
     async def back(self, it: discord.Interaction, b):
-        # ทำการเรียกฟังก์ชันจัดการใบลาทั้งหมดใหม่ เพื่อให้แอดมินเห็นรายการเลือกอีกครั้ง
-        # โดยการส่ง View ที่ชื่อ AdminLeaveManagementView() กลับไป
         await it.response.edit_message(
-        content="🛠 **แอดมินจัดการใบลา:** เลือกรายการที่ต้องการจัดการอีกครั้ง:", 
-        embed=None, 
-        view=AdminLeaveManagementView()
-    )            
+            content="🛠 **แอดมินจัดการใบลา:** เลือกรายการที่ต้องการจัดการอีกครั้ง:", 
+            embed=None, 
+            view=AdminLeaveManagementView()
+        )
+
+class AdminEditCategoryView(discord.ui.View):
+    def __init__(self, idx, od, opts):
+        super().__init__(timeout=120)
+        self.idx, self.od = idx, od
+        self.add_item(AdminEditCategorySelect(idx, od, opts))
+
+    @discord.ui.button(label="🔙 ย้อนกลับ", style=discord.ButtonStyle.secondary, row=1, custom_id="admin_edit_back_to_final")
+    async def back(self, it: discord.Interaction, b):
+        em = discord.Embed(title="⚙️ เมนูจัดการสำหรับผู้ดูแล", color=0xe67e22)
+        em.description = (f"**👤 สมาชิก:** <@{self.od['target_id']}>\n"
+                          f"**📅 วันที่:** {self.od['start_date']} - {self.od['end_date']}\n"
+                          f"**📝 ประเภท:** {self.od.get('leave_category','ทั่วไป')}\n"
+                          f"**💬 เหตุผล:** {self.od['reason']}")
+        await it.response.edit_message(content="❓ **ท่านต้องการดำเนินการอย่างไรกับใบลานี้?**", embed=em, view=AdminFinalActionView(self.idx, self.od))
+
+class AdminEditCategorySelect(discord.ui.Select):
+    def __init__(self, idx, od, opts):
+        super().__init__(placeholder="🔍 เลือกประเภทการลาใหม่...", options=opts, custom_id="admin_category_select_dropdown")
+        self.idx, self.od = idx, od
+    
+    async def callback(self, it: discord.Interaction):
+        final_cat = self.od.get('leave_category', 'ทั่วไป') if self.values[0] == "KEEP_OLD" else self.values[0]
+        await it.response.send_modal(AdminEditDetailsModal(self.idx, self.od, final_cat))
 
 class AdminEditDetailsModal(discord.ui.Modal):
-    def __init__(self, idx, od):
-        super().__init__(title="แก้ไขใบลาแบบละเอียด (Super Admin)")
-        self.idx, self.od = idx, od
+    def __init__(self, idx, od, selected_cat):
+        super().__init__(title="แก้ไขใบลาแบบละเอียด (Admin)")
+        self.idx, self.od, self.selected_cat = idx, od, selected_cat
         
-        # 1. แก้ไขวันเริ่มลา
-        self.s_i = discord.ui.TextInput(
-            label="วันเริ่มลา (วว/ดด/ปปปป) *ค.ศ.*", 
-            default=od['start_date'],
-            required=True
-        )
-        # 2. แก้ไขวันสิ้นสุดการลา
-        self.e_i = discord.ui.TextInput(
-            label="วันสิ้นสุดการลา (วว/ดด/ปปปป) *ค.ศ.*", 
-            default=od['end_date'],
-            required=True
-        )
-        # 3. แก้ไขประเภทการลา
-        self.cat = discord.ui.TextInput(
-            label="ประเภทการลา", 
-            default=od.get('leave_category', 'ทั่วไป'),
-            required=True
-        )
-        # 4. แก้ไขเหตุผลการลา
-        self.re = discord.ui.TextInput(
-            label="เหตุผลการลา", 
-            style=discord.TextStyle.paragraph,
-            default=od.get('reason', '-'),
-            required=True
-        )
-        # 5. หมายเหตุแอดมิน
-        self.admin_re = discord.ui.TextInput(
-            label="หมายเหตุจากแอดมิน (ทำไมถึงแก้?)", 
-            placeholder="ระบุเหตุผลเพื่อบันทึกใน Log...",
-            required=True
-        )
+        self.s_i = discord.ui.TextInput(label="วันเริ่มลา (วว/ดด/ปปปป) *ค.ศ.*", default=od['start_date'], required=True)
+        self.e_i = discord.ui.TextInput(label="วันสิ้นสุด (วว/ดด/ปปปป) *ค.ศ.*", default=od['end_date'], required=True)
+        self.re = discord.ui.TextInput(label="เหตุผลการลา", style=discord.TextStyle.paragraph, default=od['reason'], required=True)
+        self.admin_re = discord.ui.TextInput(label="หมายเหตุจากแอดมิน (ทำไมถึงแก้?)", placeholder="ระบุเหตุผลเพื่อบันทึกใน Log...", required=True)
         
-        # เพิ่มรายการเข้าไปใน Modal
         self.add_item(self.s_i)
         self.add_item(self.e_i)
-        self.add_item(self.cat)
         self.add_item(self.re)
         self.add_item(self.admin_re)
 
     async def on_submit(self, it: discord.Interaction):
         await it.response.defer(ephemeral=True)
         
-        new_s = self.s_i.value.strip()
-        new_e = self.e_i.value.strip()
-        
-        # ตรวจสอบความถูกต้องของวันที่ทั้งสองช่อง[cite: 1]
+        new_s, new_e = self.s_i.value.strip(), self.e_i.value.strip()
         if not validate_date(new_s) or not validate_date(new_e):
-            return await it.followup.send("❌ รูปแบบวันที่ไม่ถูกต้อง หรือไม่ใช่ปี ค.ศ. (วว/ดด/ปปปป)!", ephemeral=True)
+            return await it.followup.send("❌ รูปแบบวันที่ไม่ถูกต้อง! (วว/ดด/ปปปป)", ephemeral=True)
 
         d = load_json(DB_LEAVE, [])
         if 0 <= self.idx < len(d):
             entry = d[self.idx]
-            # เก็บค่าเก่าไว้ทำ Log
             old_s, old_e = entry['start_date'], entry['end_date']
-            old_cat, old_re = entry.get('leave_category', 'ทั่วไป'), entry.get('reason', '-')
+            old_cat = entry.get('leave_category', 'ทั่วไป')
             
             try:
                 s_dt = datetime.strptime(new_s, "%d/%m/%Y").date()
                 e_dt = datetime.strptime(new_e, "%d/%m/%Y").date()
-                
-                # ตรรกะตรวจสอบ: วันเริ่มต้องไม่เกินวันสิ้นสุด[cite: 1]
                 if e_dt < s_dt:
-                    return await it.followup.send("❌ วันสิ้นสุดต้องไม่มาก่อนวันเริ่มลา!", ephemeral=True)
-                
+                    return await it.followup.send("❌ วันสิ้นสุดต้องไม่มาก่อนวันเริ่ม!", ephemeral=True)
                 new_days = (e_dt - s_dt).days + 1
             except:
-                return await it.followup.send("❌ เกิดข้อผิดพลาดทางเทคนิคในการคำนวณวันที่!", ephemeral=True)
+                return await it.followup.send("❌ เกิดข้อผิดพลาดในการคำนวณวันที่!", ephemeral=True)
 
-            # บันทึกค่าใหม่ทั้งหมดลงในฐานข้อมูล[cite: 1]
-            entry['start_date'] = new_s
-            entry['end_date'] = new_e
-            entry['total_days'] = new_days
-            entry['leave_category'] = self.cat.value
-            entry['reason'] = self.re.value
-            
+            entry.update({
+                "start_date": new_s, "end_date": new_e,
+                "total_days": new_days,
+                "leave_category": self.selected_cat,
+                "reason": self.re.value
+            })
             save_json(DB_LEAVE, d)
-            await update_summary_board() # อัปเดตตาราง Real-time ทันที[cite: 1]
+            await update_summary_board()
             
-            # ส่ง Log แจ้งเตือนแอดมินท่านอื่น[cite: 1]
             cfg = load_json(CONFIG_PATH, {})
             log_ch = bot.get_channel(int(cfg.get("log_ch", 0)))
             if log_ch:
                 target_m = it.guild.get_member(int(self.od['target_id']))
                 tn = target_m.display_name if target_m else self.od['name']
-                
                 em = discord.Embed(title="📌 บันทึกการจัดการโดยผู้ดูแล", color=0xe67e22)
                 em.description = (
                     f"**👤 สมาชิกที่ลา:** {tn}\n"
                     f"**👮 ผู้ดำเนินการ:** {it.user.display_name} (Admin)\n\n"
-                    f"**🔄 ข้อมูลที่มีการแก้ไข:**\n"
+                    f"**🔄 ข้อมูลที่แก้ไข:**\n"
                     f"• **วันที่:** `{old_s}-{old_e}` ➔ **`{new_s}-{new_e}`**\n"
-                    f"• **ประเภท:** `{old_cat}` ➔ **`{self.cat.value}`**\n"
-                    f"• **เหตุผล:** `{old_re}` ➔ **`{self.re.value}`**\n"
-                    f"• **จำนวนวันรวม:** `{new_days} วัน`\n\n"
+                    f"• **ประเภท:** `{old_cat}` ➔ **`{self.selected_cat}`**\n"
+                    f"• **รวม:** `{new_days} วัน`\n\n"
                     f"**🛑 หมายเหตุแอดมิน:** {self.admin_re.value}\n\n"
                     f"{LONG_SEP}"
                 )
                 em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M:%S')}")
                 await log_ch.send(embed=em)
             
-            await it.edit_original_response(content="✅ อัปเดตข้อมูลใบลาเรียบร้อยสมบูรณ์!", view=None)
+            await it.edit_original_response(content="✅ อัปเดตข้อมูลใบลาเรียบร้อยแล้ว!", view=None)        
 
 # --- 5. งานรายวัน และ รายสัปดาห์ (Auto Cleanup 30 วัน + รายสัปดาห์คลีน) ---
 @tasks.loop(minutes=1)
