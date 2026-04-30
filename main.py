@@ -131,28 +131,29 @@ class LeaveModal(discord.ui.Modal):
         self.add_item(self.re)
     
     async def on_submit(self, it: discord.Interaction):
-        # เคลียร์ Interaction เดิมเพื่อให้หน้าจอสะอาด
+        # 1. แจ้ง Discord ว่ากำลังประมวลผล (ป้องกันหน้าจอขึ้น Error)
+        await it.response.defer(ephemeral=True)[cite: 1]
+        
         s = self.s_v if self.is_f else self.s_i.value.strip()
         e = self.e_v if self.is_f else self.e_i.value.strip()
         
-        # ตรวจสอบ ค.ศ.
+        # ตรวจสอบรูปแบบวันที่
         if not validate_date(s) or not validate_date(e):
             err_msg = f"**⚠️ รูปแบบวันที่ไม่ถูกต้อง หรือไม่ใช่ปี ค.ศ.!**\n\nท่านกรอกมาว่า: เริ่ม `{s}`, สิ้นสุด `{e}`\n(ตัวอย่าง ค.ศ. ที่ถูกต้อง: 28/04/2026) ❌"
-            return await it.response.send_message(content=err_msg, view=RetryView(self.title, "", "", self.cat_val, self.t_id, self.is_f, self.re.value), ephemeral=True)
+            return await it.followup.send(content=err_msg, view=RetryView(self.title, "", "", self.cat_val, self.t_id, self.is_f, self.re.value), ephemeral=True)
         
         today = get_thai_time().date()
         s_dt = datetime.strptime(s, "%d/%m/%Y").date()
         e_dt = datetime.strptime(e, "%d/%m/%Y").date()
 
         if s_dt < today:
-            return await it.response.send_message(content="❌ **ไม่สามารถลาย้อนหลังได้** (กรุณาระบุวันที่ตั้งแต่วันนี้เป็นต้นไป)", view=RetryView(self.title, "", "", self.cat_val, self.t_id, self.is_f, self.re.value), ephemeral=True)
+            return await it.followup.send(content="❌ **ไม่สามารถลาย้อนหลังได้**", view=RetryView(self.title, "", "", self.cat_val, self.t_id, self.is_f, self.re.value), ephemeral=True)
         if e_dt < s_dt:
-            return await it.response.send_message(content="❌ **วันที่สิ้นสุดต้องไม่มาก่อนวันที่เริ่มต้น!**", view=RetryView(self.title, s, "", self.cat_val, self.t_id, self.is_f, self.re.value), ephemeral=True)
+            return await it.followup.send(content="❌ **วันที่สิ้นสุดต้องไม่มาก่อนวันที่เริ่มต้น!**", view=RetryView(self.title, s, "", self.cat_val, self.t_id, self.is_f, self.re.value), ephemeral=True)
 
-        # กฎข้อที่ 2: ลาได้ไม่เกิน 15 วัน
         days = (e_dt - s_dt).days + 1
         if days > 15:
-            return await it.response.send_message(content=f"❌ **ไม่สามารถแจ้งลาเกิน 15 วันได้ (ท่านลา {days} วัน)**\nโปรดติดต่อแอดมินโดยตรงเพื่อทำรายการพิเศษ", view=RetryView(self.title, s, e, self.cat_val, self.t_id, self.is_f, self.re.value), ephemeral=True)
+            return await it.followup.send(content=f"❌ **ไม่สามารถแจ้งลาเกิน 15 วันได้ (ท่านลา {days} วัน)**", view=RetryView(self.title, s, e, self.cat_val, self.t_id, self.is_f, self.re.value), ephemeral=True)
 
         target_uid = self.t_id if self.t_id else str(it.user.id)
         d = load_json(DB_LEAVE, [])
@@ -160,6 +161,7 @@ class LeaveModal(discord.ui.Modal):
         d.append({
             "user_id": str(it.user.id),
             "target_id": target_uid,
+            "name": it.user.display_name, # บันทึกชื่อเล่นลงฐานข้อมูลเบื้องต้น
             "leave_category": self.cat_val,
             "start_date": s,
             "end_date": e,
@@ -168,26 +170,26 @@ class LeaveModal(discord.ui.Modal):
         })
         
         save_json(DB_LEAVE, d)
-        await update_summary_board()
+        await update_summary_board()[cite: 1]
         
-        # --- ส่วนที่ปรับปรุงใน LeaveModal.on_submit ---
+        # --- ส่วนของ Log (ใช้ Display Name และไม่มี Mention) ---
         cfg = load_json(CONFIG_PATH, {})
         log_ch_id = cfg.get("log_ch")
         if log_ch_id:
             log_ch = bot.get_channel(int(log_ch_id))
             if log_ch:
-                # ดึงข้อมูล Member เพื่อเอา Display Name
+                # ดึงชื่อเล่นจาก Discord
                 target_m = it.guild.get_member(int(target_uid))
                 target_name = target_m.display_name if target_m else f"ID: {target_uid}"
-                
+                executor_name = it.user.display_name
+
                 is_on_behalf = True if self.t_id and self.t_id != str(it.user.id) else False
                 log_title = "📌 บันทึกการแจ้งลาแทนเพื่อน" if is_on_behalf else "📌 บันทึกการแจ้งลาใหม่"
                 log_color = 0x3498db if is_on_behalf else 0x2ecc71
                 
                 log_em = discord.Embed(title=log_title, color=log_color)
-                
-                # ใช้ชื่อเล่นแทนการ Mention
-                on_behalf_txt = f"\n**👮 ผู้แจ้งลาแทน:** {it.user.display_name}" if is_on_behalf else ""
+                # ใช้ชื่อเล่นธรรมดา ไม่ใช้ <@ID>
+                on_behalf_txt = f"\n**👮 ผู้แจ้งลาแทน:** {executor_name}" if is_on_behalf else ""
                 dr = s if s == e else f"{s} - {e}"
                 
                 log_em.description = (
@@ -198,7 +200,15 @@ class LeaveModal(discord.ui.Modal):
                     f"{LONG_SEP}"
                 )
                 log_em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M')} น.")
-                await log_ch.send(embed=log_em)
+                await log_ch.send(embed=log_em)[cite: 1]
+        
+        # 2. ตอบกลับสำเร็จ และลบข้อความใน 3 วินาที
+        success_msg = await it.followup.send(content='✅ ระบบบันทึกใบลาของคุณเรียบร้อยแล้ว!', ephemeral=True)[cite: 1]
+        await asyncio.sleep(3)[cite: 1]
+        try:
+            await success_msg.delete()[cite: 1]
+        except:
+            pass
 
 class RetryView(discord.ui.View):
     def __init__(self, title, s, e, cat, t_id, is_f, re_val):
