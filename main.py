@@ -552,8 +552,11 @@ class AdminEditDetailsModal(discord.ui.Modal):
         d = load_json(DB_LEAVE, [])
         if 0 <= self.idx < len(d):
             entry = d[self.idx]
+            
+            # [1] เก็บข้อมูลเดิมไว้เปรียบเทียบก่อนถูกแก้ไข
             old_s, old_e = entry['start_date'], entry['end_date']
             old_cat = entry.get('leave_category', 'ทั่วไป')
+            old_days = entry.get('total_days', 1)
             
             try:
                 s_dt = datetime.strptime(new_s, "%d/%m/%Y").date()
@@ -564,6 +567,7 @@ class AdminEditDetailsModal(discord.ui.Modal):
             except:
                 return await it.followup.send("❌ เกิดข้อผิดพลาดในการคำนวณวันที่!", ephemeral=True)
 
+            # [2] อัปเดตข้อมูลใหม่ลงในรายการ
             entry.update({
                 "start_date": new_s, "end_date": new_e,
                 "total_days": new_days,
@@ -573,26 +577,43 @@ class AdminEditDetailsModal(discord.ui.Modal):
             save_json(DB_LEAVE, d)
             await update_summary_board()
             
+            # [3] เตรียมข้อความ Log แบบเช็คส่วนต่าง (ถ้าไม่เปลี่ยนให้โชว์ของเดิมปกติ)
+            old_range = f"{old_s}" if old_s == old_e else f"{old_s} - {old_e}"
+            new_range = f"{new_s}" if new_s == new_e else f"{new_s} - {new_e}"
+            # ลอจิก: ถ้าค่าใหม่ไม่เท่ากับค่าเก่า ให้แสดงแบบมีลูกศร ถ้าเท่ากันให้แสดงแค่ค่าเดียว[cite: 3]
+            date_log = f"`{old_range}` ➔ **`{new_range}`**" if old_range != new_range else old_range
+            cat_log = f"`{old_cat}` ➔ **`{self.selected_cat}`**" if old_cat != self.selected_cat else old_cat
+            days_log = f"`{old_days}` ➔ **`{new_days}` วัน**" if old_days != new_days else f"{old_days} วัน"
+
+            # [4] ส่ง Log เข้าห้องที่ตั้งค่าไว้[cite: 3]
             cfg = load_json(CONFIG_PATH, {})
             log_ch = bot.get_channel(int(cfg.get("log_ch", 0)))
             if log_ch:
                 target_m = it.guild.get_member(int(self.od['target_id']))
                 tn = target_m.display_name if target_m else self.od['name']
-                em = discord.Embed(title="📌 บันทึกการจัดการโดยผู้ดูแล", color=0xe67e22)
+                
+                em = discord.Embed(title="📌 บันทึกการจัดการโดยผู้ดูแล (แก้ไขใบลา)", color=0xe67e22)
                 em.description = (
-                    f"**👤 สมาชิกที่ลา:** {tn}\n"
+                    f"**👤 สมาชิกที่ลา:** {tn} (<@{self.od['target_id']}>)\n"
                     f"**👮 ผู้ดำเนินการ:** {it.user.display_name} (Admin)\n\n"
-                    f"**🔄 ข้อมูลที่แก้ไข:**\n"
-                    f"• **วันที่:** `{old_s}-{old_e}` ➔ **`{new_s}-{new_e}`**\n"
-                    f"• **ประเภท:** `{old_cat}` ➔ **`{self.selected_cat}`**\n"
-                    f"• **รวม:** `{new_days} วัน`\n\n"
-                    f"**🛑 หมายเหตุแอดมิน:** {self.admin_re.value}\n\n"
+                    f"**🔄 รายละเอียดการเปลี่ยนแปลง:**\n"
+                    f"• **วันที่ลา:** {date_log}\n"
+                    f"• **ประเภทการลา:** {cat_log}\n"
+                    f"• **จำนวนวัน:** {days_log}\n\n"
+                    f"**💬 เหตุผลของสมาชิก:**\n> {self.re.value}\n"
+                    f"**🛑 หมายเหตุจากแอดมิน:**\n> {self.admin_re.value}\n\n"
                     f"{LONG_SEP}"
                 )
                 em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M:%S')}")
                 await log_ch.send(embed=em)
             
+            # [5] ตอบกลับและลบข้อความลับอัตโนมัติ[cite: 3]
             await it.edit_original_response(content="✅ อัปเดตข้อมูลใบลาเรียบร้อยแล้ว!", view=None)        
+            await asyncio.sleep(3) 
+            try:            
+                await it.delete_original_response() 
+            except (discord.NotFound, discord.HTTPException):
+                pass        
 
 # --- 5. งานรายวัน และ รายสัปดาห์ (Auto Cleanup 30 วัน + รายสัปดาห์คลีน) ---
 @tasks.loop(minutes=1)
