@@ -543,33 +543,58 @@ class AdminEditDetailsModal(discord.ui.Modal):
         self.add_item(self.admin_re)
 
     async def on_submit(self, it: discord.Interaction):
-        # ... (ส่วนการรับค่าและโหลด JSON คงเดิม) ...
+        # 1. แจ้ง Discord ทันทีว่าได้รับข้อมูลแล้ว เพื่อป้องกัน Error "เกิดข้อผิดพลาด"
+        await it.response.defer(ephemeral=True)
+        
+        # 2. ดึงค่าจากฟิลด์ต่างๆ ใน Modal
+        new_s = self.s_i.value.strip()
+        new_e = self.e_i.value.strip()
+        new_reason = self.re.value.strip() # รับค่าเหตุผลใหม่[cite: 3]
+        admin_note = self.admin_re.value.strip() # รับหมายเหตุแอดมิน
+        
+        # ตรวจสอบความถูกต้องของวันที่
+        if not validate_date(new_s) or not validate_date(new_e):
+            return await it.followup.send("❌ รูปแบบวันที่ไม่ถูกต้อง! (วว/ดด/ปปปป)", ephemeral=True)
 
+        d = load_json(DB_LEAVE, [])
         if 0 <= self.idx < len(d):
             entry = d[self.idx]
             
-            # [1] เก็บข้อมูลเดิมไว้เปรียบเทียบ
+            # [A] เก็บข้อมูลเดิมไว้เปรียบเทียบก่อนถูกแก้ไข[cite: 2]
             old_s, old_e = entry['start_date'], entry['end_date']
             old_cat = entry.get('leave_category', 'ทั่วไป')
             old_days = entry.get('total_days', 1)
             old_reason = entry.get('reason', '-')
             
-            # ... (ส่วนการคำนวณ new_days และอัปเดต entry คงเดิม) ...[cite: 2]
+            try:
+                s_dt = datetime.strptime(new_s, "%d/%m/%Y").date()
+                e_dt = datetime.strptime(new_e, "%d/%m/%Y").date()
+                if e_dt < s_dt:
+                    return await it.followup.send("❌ วันสิ้นสุดต้องไม่มาก่อนวันเริ่ม!", ephemeral=True)
+                new_days = (e_dt - s_dt).days + 1
+            except Exception as ex:
+                return await it.followup.send(f"❌ เกิดข้อผิดพลาดในการคำนวณ: {ex}", ephemeral=True)
 
-            # [2] เตรียมข้อความ Log แบบเช็คส่วนต่าง (ถ้าไม่เปลี่ยนให้เพิ่มคำว่า คงเดิม)[cite: 2]
+            # [B] อัปเดตข้อมูลใหม่ลงในไฟล์ JSON[cite: 3]
+            entry.update({
+                "start_date": new_s, "end_date": new_e,
+                "total_days": new_days,
+                "leave_category": self.selected_cat,
+                "reason": new_reason
+            })
+            save_json(DB_LEAVE, d)
+            await update_summary_board()
+            
+            # [C] ลอจิกการเตรียมข้อความ Log (ถ้าไม่เปลี่ยนให้เพิ่มคำว่า คงเดิม)[cite: 2]
             old_range = f"{old_s}" if old_s == old_e else f"{old_s} - {old_e}"
             new_range = f"{new_s}" if new_s == new_e else f"{new_s} - {new_e}"
             
-            # เช็ควันที่ลา[cite: 2]
-            date_log = f"`{old_range}` ➔ **`{new_range}`**" if old_range != new_range else f"{old_range} (คงเดิม)"
-            # เช็คประเภทการลา[cite: 2]
-            cat_log = f"`{old_cat}` ➔ **`{self.selected_cat}`**" if old_cat != self.selected_cat else f"{old_cat} (คงเดิม)"
-            # เช็คจำนวนวัน[cite: 2]
-            days_log = f"`{old_days}` ➔ **`{new_days}` วัน**" if old_days != new_days else f"{old_days} วัน (คงเดิม)"
-            # เช็คเหตุผล[cite: 2]
-            reason_log = f"`{old_reason}` ➔ **`{new_reason}`**" if old_reason != new_reason else f"{old_reason} (คงเดิม)"
+            date_log = f"`{old_range}` ➔ **`{new_range}`**" if old_range != new_range else f"{old_range} (คงเดิม)"[cite: 2]
+            cat_log = f"`{old_cat}` ➔ **`{self.selected_cat}`**" if old_cat != self.selected_cat else f"{old_cat} (คงเดิม)"[cite: 2]
+            days_log = f"`{old_days}` ➔ **`{new_days}` วัน**" if old_days != new_days else f"{old_days} วัน (คงเดิม)"[cite: 2]
+            reason_log = f"`{old_reason}` ➔ **`{new_reason}`**" if old_reason != new_reason else f"{old_reason} (คงเดิม)"[cite: 2]
 
-            # [3] สร้างและส่ง Embed (ใช้ Display Name และเปลี่ยนหัวข้อเป็น เหตุผล)[cite: 2]
+            # [D] ส่ง Log (ใช้ Display Name, ไม่ Mention)[cite: 2]
             cfg = load_json(CONFIG_PATH, {})
             log_ch = bot.get_channel(int(cfg.get("log_ch", 0)))
             if log_ch:
@@ -585,13 +610,13 @@ class AdminEditDetailsModal(discord.ui.Modal):
                     f"• **ประเภทการลา:** {cat_log}\n"
                     f"• **จำนวนวัน:** {days_log}\n"
                     f"• **เหตุผล:** {reason_log}\n\n"
-                    f"**🛑 หมายเหตุจากแอดมิน:**\n> {self.admin_re.value}\n\n"
+                    f"**🛑 หมายเหตุจากแอดมิน:**\n> {admin_note}\n\n"
                     f"{LONG_SEP}"
                 )
                 em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M:%S')}")
                 await log_ch.send(embed=em)
-                           
-            # ... (ส่วนการตอบกลับ Success และ delete_original_response คงเดิม) ...[cite: 2]
+
+            # [E] ตอบกลับสำเร็จและลบข้อความลับทิ้งใน 3 วินาที[cite: 2]
             await it.edit_original_response(content="✅ อัปเดตข้อมูลใบลาเรียบร้อยแล้ว!", view=None)        
             await asyncio.sleep(3) 
             try:            
