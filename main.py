@@ -562,20 +562,32 @@ class CancelReasonModal(discord.ui.Modal):
             if log_ch_id:
                 log_ch = bot.get_channel(int(log_ch_id))
                 if log_ch:
-                    is_admin = any(r.name in ["Admin", "ผู้ดูแล"] for r in it.user.roles)
-                    log_title = "📌 บันทึกการยกเลิกโดยผู้ดูแล" if is_admin else "📌 บันทึกยกเลิกการแจ้งลา"
-                    log_color = 0xe67e22 if is_admin else 0xe74c3c 
+                    u_id = str(it.user.id)
+                    # เช็คว่ามี Role แอดมินหรือไม่
+                    has_admin_role = any(r.name in ["Admin", "ผู้ดูแล"] for r in it.user.roles)
                     
-                    # ใช้ชื่อเล่น (Display Name) และไม่ Mention
+                    # เช็คว่าคนกดคือเจ้าของใบลา หรือเป็นคนแจ้งลาใบนี้หรือไม่
+                    is_involved = u_id == old_data['target_id'] or u_id == old_data['user_id']
+                    
+                    # จะถือว่าเป็น "การกระทำของแอดมิน" ก็ต่อเมื่อ มี Role และไม่ได้เกี่ยวข้องกับใบลาใบนั้น
+                    is_admin_action = has_admin_role and not is_involved
+                    
+                    # ตั้งค่าสีและหัวข้อ
+                    log_title = "📌 บันทึกการยกเลิกโดยผู้ดูแล" if is_admin_action else "📌 บันทึกยกเลิกการแจ้งลา"
+                    log_color = 0xe67e22 if is_admin_action else 0xe74c3c 
+                    
                     target_member = it.guild.get_member(int(old_data['target_id']))
                     target_name = target_member.display_name if target_member else old_data['name']
                     executor_name = it.user.display_name
                     
                     log_em = discord.Embed(title=log_title, color=log_color)
+                    
+                    # จัดการข้อความผู้ดำเนินการ
                     on_behalf = ""
-                    if is_admin:
+                    if is_admin_action:
                         on_behalf = f"\n**👮 ผู้ดำเนินการ:** {executor_name} (Admin)"
-                    elif str(it.user.id) != old_data['target_id']:
+                    elif u_id != old_data['target_id']:
+                        # กรณีแอดมินยกเลิกใบลาที่ตัวเองแจ้งแทน หรือเพื่อนปกติยกเลิกที่ตัวเองแจ้งแทน
                         on_behalf = f"\n**👤 ผู้ดำเนินการ:** {executor_name} (ผู้แจ้งลาแทน)"
                     
                     dr = old_data['start_date'] if old_data['start_date'] == old_data['end_date'] else f"{old_data['start_date']} - {old_data['end_date']}"
@@ -590,7 +602,6 @@ class CancelReasonModal(discord.ui.Modal):
                     log_em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M')} น.")
                     await log_ch.send(embed=log_em)
             
-            # ตอบกลับลับและหายไปใน 3 วิ
             await it.edit_original_response(content=f"❌ ยกเลิกรายการแจ้งลาเรียบร้อยแล้ว!", view=None)
             await asyncio.sleep(3)
             try:
@@ -646,20 +657,26 @@ async def process_edit_leave(it, idx, od, new_end_str, edit_reason="-"):
         if log_ch_id:
             log_ch = bot.get_channel(int(log_ch_id))
             if log_ch:
-                is_admin = any(r.name in ["Admin", "ผู้ดูแล"] for r in it.user.roles)
-                log_title = "📌 บันทึกการแก้ไขโดยผู้ดูแล" if is_admin else "📌 บันทึกการแก้ไขวันสิ้นสุดการลา"
-                log_color = 0xe67e22 if is_admin else 0x95a5a6
+                u_id = str(it.user.id)
+                has_admin_role = any(r.name in ["Admin", "ผู้ดูแล"] for r in it.user.roles)
                 
-                # ใช้ชื่อเล่น (Display Name) และไม่ Mention
+                # เช็คการมีส่วนเกี่ยวข้อง (เป็นคนลาเอง หรือเป็นคนแจ้งลาใบนี้)
+                is_involved = u_id == od['target_id'] or u_id == od['user_id']
+                is_admin_action = has_admin_role and not is_involved
+                
+                log_title = "📌 บันทึกการแก้ไขโดยผู้ดูแล" if is_admin_action else "📌 บันทึกการแก้ไขวันสิ้นสุดการลา"
+                log_color = 0xe67e22 if is_admin_action else 0x95a5a6
+                
                 target_member = it.guild.get_member(int(od['target_id']))
                 target_name = target_member.display_name if target_member else od['name']
                 executor_name = it.user.display_name
                 
                 log_em = discord.Embed(title=log_title, color=log_color)
+                
                 on_behalf = ""
-                if is_admin:
+                if is_admin_action:
                     on_behalf = f"\n**👮 ผู้แจ้งแก้ไขแทน:** {executor_name} (Admin)"
-                elif od['target_id'] != str(it.user.id):
+                elif u_id != od['target_id']:
                     on_behalf = f"\n**👤 ผู้แจ้งแก้ไขแทน:** {executor_name} (ผู้แจ้งลาแทน)"
                 
                 log_em.description = (
@@ -675,7 +692,6 @@ async def process_edit_leave(it, idx, od, new_end_str, edit_reason="-"):
                 log_em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M')} น.")
                 await log_ch.send(embed=log_em)
         
-        # ตอบกลับลับและหายไปใน 3 วิ
         await it.edit_original_response(content=f"✏️ แก้ไขข้อมูลการลาเรียบร้อยแล้ว!", embed=None, view=None)
         await asyncio.sleep(3)
         try:
