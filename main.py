@@ -219,14 +219,22 @@ class RetryView(discord.ui.View):
             pass
 
 # --- 4. ส่วน Admin (ปรับหัวข้อหน้าหลักตามสั่ง + หมายเหตุใหม่) ---
-class ConfirmClearView(discord.ui.View):
+class ConfirmClearView(discord.ui.View): # ใช้ View ตามปกติของ Discord.py
     def __init__(self):
-        super().__init__(timeout=60)
-    @discord.ui.button(label="⚠️ ยืนยันล้างข้อมูลถาวร", style=discord.ButtonStyle.danger)
-    async def confirm(self, it: discord.Interaction, b):
+        # 1. เปลี่ยน timeout เป็น None เพื่อไม่ให้ปุ่มหมดอายุ
+        super().__init__(timeout=None) 
+
+    # 2. เพิ่ม custom_id เพื่อให้บอทจำปุ่มนี้ได้แม้จะรีสตาร์ท
+    @discord.ui.button(label="⚠️ ยืนยันล้างข้อมูลเก่า (ย้อนหลัง 1 เดือน)", 
+                       style=discord.ButtonStyle.danger, 
+                       custom_id="admin_confirm_cleanup_v1") 
+    async def confirm(self, it: discord.Interaction, b: discord.ui.Button):
+        # ... (โค้ดการทำงานข้างในเหมือนเดิมที่คุณมี) ...
         await it.response.defer(ephemeral=True)
+        # (ส่วนการ Filter ข้อมูล 30 วันที่คุณเพิ่งทำไป)
         
-        # กฎข้อที่ 14: ส่ง Backup เต็มรูปแบบให้แอดมินทุกคน
+        # 1. สำรองข้อมูลส่งให้แอดมินก่อนดำเนินการ
+        d = load_json(DB_LEAVE, [])
         admin_roles = ["Admin", "ผู้ดูแล"]
         for member in it.guild.members:
             if any(r.name in admin_roles for r in member.roles) and not member.bot:
@@ -234,12 +242,28 @@ class ConfirmClearView(discord.ui.View):
                     f_send = []
                     if os.path.exists(DB_LEAVE): f_send.append(discord.File(DB_LEAVE))
                     if os.path.exists(CONFIG_PATH): f_send.append(discord.File(CONFIG_PATH))
-                    await member.send(f"⚠️ **แจ้งเตือนการล้างข้อมูลโดย <@{it.user.id}>**\nนี่คือไฟล์สำรองข้อมูลก่อนถูกลบทิ้งครับ:", files=f_send)
+                    await member.send(f"⚠️ **แจ้งเตือนการล้างข้อมูลเก่าโดย {it.user.display_name}**\nนี่คือไฟล์สำรองข้อมูลครับ:", files=f_send)
                 except:
                     continue
 
-        # ล้างข้อมูลจริง
-        save_json(DB_LEAVE, [])
+        # 2. กรองข้อมูลย้อนหลัง 30 วัน
+        now = get_thai_time().date()
+        threshold_date = now - timedelta(days=30) 
+        filtered_data = []
+        removed_count = 0
+        
+        for entry in d:
+            try:
+                end_dt = datetime.strptime(entry['end_date'], "%d/%m/%Y").date()
+                if end_dt >= threshold_date:
+                    filtered_data.append(entry)
+                else:
+                    removed_count += 1
+            except:
+                removed_count += 1
+
+        # 3. บันทึกข้อมูลและส่ง Log สีส้ม[cite: 3]
+        save_json(DB_LEAVE, filtered_data)
         await update_summary_board()
         
         cfg = load_json(CONFIG_PATH, {})
@@ -247,16 +271,20 @@ class ConfirmClearView(discord.ui.View):
         if log_ch_id:
             log_ch = bot.get_channel(int(log_ch_id))
             if log_ch:
-                l_em = discord.Embed(title="⚠️ ประกาศ: มีการล้างข้อมูลใบลาทั้งหมดในระบบ", color=0xf39c12)
+                # ใช้สีส้ม 0xf39c12 ตามที่คุณระบุ[cite: 3]
+                l_em = discord.Embed(title="⚠️ ประกาศ: Cleanup ข้อมูลใบลาประจำเดือน", color=0xf39c12)
                 l_em.description = (
-                    f"**👮 ผู้ดำเนินการ:** <@{it.user.id}>\n"
-                    f"**📅 วันที่ดำเนินการ:** {get_thai_time().strftime('%d/%m/%Y')}\n"
-                    f"**⏰ เวลา:** {get_thai_time().strftime('%H:%M น.')}\n\n"
-                    f"**📋 รายละเอียด:**\n- ทำการลบข้อมูลการลาทั้งหมดเรียบร้อยแล้ว\n- ระบบส่งไฟล์ Backup เข้า DM แอดมินทุกคนแล้ว\n\n{LONG_SEP}"
+                    f"**👮 ผู้ดำเนินการ:** {it.user.display_name}\n"
+                    f"**🧹 ลบข้อมูลที่เก่ากว่า:** {threshold_date.strftime('%d/%m/%Y')}\n"
+                    f"**📊 จำนวนที่ลบออก:** `{removed_count}` รายการ\n"
+                    f"**📦 ข้อมูลคงเหลือ:** `{len(filtered_data)}` รายการ\n\n"
+                    f"{LONG_SEP}"
                 )
+                # เพิ่ม Footer บันทึกเมื่อ ตามด้วยวันที่และเวลา
+                l_em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M:%S')}")
                 await log_ch.send(embed=l_em)
             
-        await it.edit_original_response(content="✅ ล้างข้อมูลสำเร็จและสำรองไฟล์เรียบร้อย!", view=None)
+        await it.edit_original_response(content=f"✅ Cleanup สำเร็จ! ลบข้อมูลเก่าทิ้ง `{removed_count}` รายการเรียบร้อยแล้ว", view=None)
         await asyncio.sleep(3)
         try:
             await it.delete_original_response()
@@ -272,12 +300,16 @@ class AdminSubChannelSelect(discord.ui.ChannelSelect):
 
 class AdminSubMenuView(discord.ui.View):
     def __init__(self, cat):
-        super().__init__(timeout=120)
+        super().__init__(timeout=None) # บังคับให้ปุ่มไม่หมดอายุ
         self.cat = cat
         self.temp_ch = None
         self.add_item(AdminSubChannelSelect())
-    @discord.ui.button(label="ยืนยันตั้งค่า", style=discord.ButtonStyle.success)
+
+    @discord.ui.button(label="ยืนยันตั้งค่า", 
+                       style=discord.ButtonStyle.success, 
+                       custom_id="admin_save_room_config") # เพิ่ม ID ตรงนี้
     async def confirm(self, it: discord.Interaction, b):
+        # ... (โค้ดเดิมของคุณ) ...
         if not self.temp_ch:
             return await it.response.send_message("❌ กรุณาเลือกห้องก่อน!", ephemeral=True)
         await it.response.defer(ephemeral=True)
@@ -328,9 +360,10 @@ class SubMenuView(discord.ui.View):
 # --- ส่วนที่ 1: หน้าเลือกเลือกระบบ (ลา หรือ ปรับเงิน) ---
 class CategorySelectionView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=60)
+        # 1. ตั้งค่า timeout เป็น None เพื่อให้ View นี้ไม่หมดอายุ
+        super().__init__(timeout=None)
 
-    # ปุ่มระบบแจ้งลา
+    # 2. ตรวจสอบว่าปุ่มมี custom_id ที่แน่นอน
     @discord.ui.button(label="📝 ระบบแจ้งลา", style=discord.ButtonStyle.primary, emoji="📋", custom_id="setup_leave_system")
     async def leave_system_setup(self, it: discord.Interaction, button: discord.ui.Button):
         opts = [
@@ -340,9 +373,9 @@ class CategorySelectionView(discord.ui.View):
             discord.SelectOption(label="📊 ประวัติรายวัน", value="daily_ch"),
             discord.SelectOption(label="📊 สรุปประวัติรายสัปดาห์", value="weekly_ch"),
         ]
+        # เมื่อเปลี่ยนหน้าเมนู แนะนำให้ใช้ View ใหม่ที่รองรับ Persistent เช่นกัน
         await it.response.edit_message(content="🛠 **ระบบแจ้งลา:** เลือกหัวข้อที่ต้องการตั้งค่า:", view=SubMenuView(it, AdminCatSelect(opts)))
 
-    # ปุ่มระบบแจ้งปรับเงิน (ที่คุณสั่งเพิ่ม)
     @discord.ui.button(label="💰 ระบบแจ้งปรับเงิน", style=discord.ButtonStyle.danger, emoji="💸", custom_id="setup_fine_system")
     async def fine_system_setup(self, it: discord.Interaction, button: discord.ui.Button):
         opts = [
@@ -943,9 +976,14 @@ async def backup(ctx):
 # --- ย้าย on_ready มาไว้ท้ายสุด และใส่ add_view ให้ครบ ---
 @bot.event
 async def on_ready():
-    bot.add_view(LeaveMainView())
-    bot.add_view(RealtimeRefreshView())
-    print('Bot DMD Online | System Year: 2026')
+    # ลงทะเบียน View ทั้งหมดเพื่อให้ปุ่มทำงานได้ตลอดกาล (Persistent Views)
+    bot.add_view(LeaveMainView())         # หน้าหลักแจ้งลา
+    bot.add_view(RealtimeRefreshView())    # ปุ่มรีเฟรชบอร์ด
+    bot.add_view(AdminPanelView())         # หน้าหลัก !admin
+    bot.add_view(CategorySelectionView())  # หน้าเลือกหมวดหมู่ (แจ้งลา/แจ้งปรับเงิน)
+    bot.add_view(ConfirmClearView())       # หน้ากดยืนยัน Cleanup 30 วัน
+    
+    print(f'✅ {bot.user.name} ออนไลน์เรียบร้อย | ระบบปี 2026 พร้อมใช้งาน')
     if not daily_report_task.is_running(): daily_report_task.start()
     if not weekly_report_task.is_running(): weekly_report_task.start()
 
