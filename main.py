@@ -816,7 +816,7 @@ class CancelReasonModal(discord.ui.Modal):
             cfg = load_json(CONFIG_PATH, {})
             log_ch_id = cfg.get("log_ch")
             if log_ch_id:
-                # ปรับปรุงการหาห้อง Log[cite: 3]
+                # ค้นหาห้อง Log
                 log_ch = bot.get_channel(int(log_ch_id))
                 if not log_ch:
                     try: log_ch = await bot.fetch_channel(int(log_ch_id))
@@ -828,25 +828,30 @@ class CancelReasonModal(discord.ui.Modal):
                     is_involved = u_id == old_data['target_id'] or u_id == old_data['user_id']
                     is_admin_action = has_admin_role and not is_involved
                     
-                    log_title = "📌 บันทึกการยกเลิกโดยผู้ดูแล" if is_admin_action else "📌 บันทึกยกเลิกการแจ้งลา"
+                    log_title = "📌 บันทึกการจัดการโดยผู้ดูแล (ยกเลิกใบลา)" if is_admin_action else "📌 บันทึกยกเลิกการแจ้งลา"
                     log_color = 0xe67e22 if is_admin_action else 0xe74c3c 
                     
                     target_member = it.guild.get_member(int(old_data['target_id']))
-                    target_name = target_member.display_name if target_member else old_data['name']
+                    tn = target_member.display_name if target_member else old_data['name']
                     
                     log_em = discord.Embed(title=log_title, color=log_color)
-                    on_behalf = f"\n**👮 ผู้ดำเนินการ:** {it.user.display_name} (Admin)" if is_admin_action else ""
+                    on_behalf = f"\n**👮 ผู้ดำเนินการ:** {it.user.display_name}" + (" (Admin)" if is_admin_action else "") + "\n\n"
                     
                     dr = old_data['start_date'] if old_data['start_date'] == old_data['end_date'] else f"{old_data['start_date']} - {old_data['end_date']}"
+                    
+                    # --- ส่วนที่แก้ไขหัวข้อตามคำขอ ---
                     log_em.description = (
-                        f"**👤 สมาชิกที่ลา:** {target_name}{on_behalf}\n\n"
-                        f"**📝 ประเภท:** {old_data.get('leave_category', 'ทั่วไป')}\n"
-                        f"**📅 วันที่ลา:** {dr} `(รวม {old_data.get('total_days', 1)} วัน)`\n"
-                        f"**💬 เหตุผลเดิมที่แจ้ง:** {old_data.get('reason', '-')}\n"
-                        f"**🛑 เหตุผลที่ยกเลิก:** {self.reason.value}\n\n"
+                        f"**👤 สมาชิกที่ลา:** {tn}\n"
+                        f"{on_behalf}"
+                        f"**📝 รายละเอียดรายการที่ถูกยกเลิก:**\n"
+                        f"• **วันที่ลา:** {dr}\n"
+                        f"• **ประเภทการลา:** {old_data.get('leave_category', 'ทั่วไป')}\n"
+                        f"• **จำนวนวัน:** {old_data.get('total_days', 1)} วัน\n"
+                        f"• **เหตุผลเดิม:** {old_data.get('reason', '-')}\n\n"
+                        f"**🛑 หมายเหตุจากแอดมิน:**\n> {self.reason.value}\n\n"  # เปลี่ยนหัวข้อตรงนี้
                         f"{LONG_SEP}"
                     )
-                    log_em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M')} น.")
+                    log_em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M:%S')}")
                     await log_ch.send(embed=log_em)
             
             await it.edit_original_response(content=f"❌ ยกเลิกรายการแจ้งลาเรียบร้อยแล้ว!", view=None)
