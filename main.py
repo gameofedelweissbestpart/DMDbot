@@ -131,13 +131,12 @@ class LeaveModal(discord.ui.Modal):
         self.add_item(self.re)
     
     async def on_submit(self, it: discord.Interaction):
-        # 1. แจ้ง Discord ว่ากำลังประมวลผล (ป้องกันหน้าจอขึ้น Error)
-        await it.response.defer(ephemeral=True)[cite: 1]
+        # แจ้ง Discord ว่ากำลังประมวลผลทันที (เพื่อไม่ให้ขึ้น Error "เกิดข้อผิดพลาด")
+        await it.response.defer(ephemeral=True)
         
         s = self.s_v if self.is_f else self.s_i.value.strip()
         e = self.e_v if self.is_f else self.e_i.value.strip()
         
-        # ตรวจสอบรูปแบบวันที่
         if not validate_date(s) or not validate_date(e):
             err_msg = f"**⚠️ รูปแบบวันที่ไม่ถูกต้อง หรือไม่ใช่ปี ค.ศ.!**\n\nท่านกรอกมาว่า: เริ่ม `{s}`, สิ้นสุด `{e}`\n(ตัวอย่าง ค.ศ. ที่ถูกต้อง: 28/04/2026) ❌"
             return await it.followup.send(content=err_msg, view=RetryView(self.title, "", "", self.cat_val, self.t_id, self.is_f, self.re.value), ephemeral=True)
@@ -161,7 +160,7 @@ class LeaveModal(discord.ui.Modal):
         d.append({
             "user_id": str(it.user.id),
             "target_id": target_uid,
-            "name": it.user.display_name, # บันทึกชื่อเล่นลงฐานข้อมูลเบื้องต้น
+            "name": it.user.display_name,
             "leave_category": self.cat_val,
             "start_date": s,
             "end_date": e,
@@ -170,15 +169,13 @@ class LeaveModal(discord.ui.Modal):
         })
         
         save_json(DB_LEAVE, d)
-        await update_summary_board()[cite: 1]
+        await update_summary_board() # บอร์ด Real-time จะอัปเดตตรงนี้
         
-        # --- ส่วนของ Log (ใช้ Display Name และไม่มี Mention) ---
         cfg = load_json(CONFIG_PATH, {})
         log_ch_id = cfg.get("log_ch")
         if log_ch_id:
             log_ch = bot.get_channel(int(log_ch_id))
             if log_ch:
-                # ดึงชื่อเล่นจาก Discord
                 target_m = it.guild.get_member(int(target_uid))
                 target_name = target_m.display_name if target_m else f"ID: {target_uid}"
                 executor_name = it.user.display_name
@@ -188,7 +185,6 @@ class LeaveModal(discord.ui.Modal):
                 log_color = 0x3498db if is_on_behalf else 0x2ecc71
                 
                 log_em = discord.Embed(title=log_title, color=log_color)
-                # ใช้ชื่อเล่นธรรมดา ไม่ใช้ <@ID>
                 on_behalf_txt = f"\n**👮 ผู้แจ้งลาแทน:** {executor_name}" if is_on_behalf else ""
                 dr = s if s == e else f"{s} - {e}"
                 
@@ -200,13 +196,13 @@ class LeaveModal(discord.ui.Modal):
                     f"{LONG_SEP}"
                 )
                 log_em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M')} น.")
-                await log_ch.send(embed=log_em)[cite: 1]
+                await log_ch.send(embed=log_em) # Log จะส่งตรงนี้
         
-        # 2. ตอบกลับสำเร็จ และลบข้อความใน 3 วินาที
-        success_msg = await it.followup.send(content='✅ ระบบบันทึกใบลาของคุณเรียบร้อยแล้ว!', ephemeral=True)[cite: 1]
-        await asyncio.sleep(3)[cite: 1]
+        # ตอบกลับสำเร็จและหายไปใน 3 วินาที
+        success_msg = await it.followup.send(content='✅ ระบบบันทึกใบลาของคุณเรียบร้อยแล้ว!', ephemeral=True)
+        await asyncio.sleep(3)
         try:
-            await success_msg.delete()[cite: 1]
+            await success_msg.delete()
         except:
             pass
 
