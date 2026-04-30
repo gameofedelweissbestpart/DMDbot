@@ -396,12 +396,12 @@ class AdminPanelView(discord.ui.View):
 
     @discord.ui.button(label="📋 ระบบลา", style=discord.ButtonStyle.primary, custom_id="admin_leave_system_main")
     async def leave_system(self, it: discord.Interaction, b):
-        # แก้ไขจาก it.response.edit_message เป็น it.response.send_message
-        # และเพิ่ม ephemeral=True เข้าไปครับ
+        # แก้ไขจุดที่มีวงเล็บเปิดค้างไว้ โดยเติมวงเล็บปิดให้สมบูรณ์ที่ท้ายคำสั่ง
         await it.response.send_message(
             content="📑 **เมนูจัดการระบบลา:** เลือกการดำเนินการที่ต้องการ", 
             view=AdminLeaveManagementView(), 
-            ephemeral=True    
+            ephemeral=True
+        ) # <--- ตรวจสอบวงเล็บปิดตรงนี้ ต้องมีวงเล็บปิดครอบพารามิเตอร์ทั้งหมด    
     
     # กฎข้อที่ 13: ปุ่มล้างข้อมูลทั้งหมด
     @discord.ui.button(label="🗑️ ล้างข้อมูลใบลา", style=discord.ButtonStyle.danger, custom_id="admin_clear_leave")
@@ -414,7 +414,7 @@ class AdminLeaveManagementView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None) # ตั้งค่าให้ปุ่มไม่หมดอายุ
 
-    @discord.ui.button(label="⚙️ จัดการใบลาทั้งหมด", style=discord.ButtonStyle.secondary, custom_id="admin_manage_all_leaves")
+    @discord.ui.button(label="⚙️ จัดการใบลาทั้งหมด", style=discord.ButtonStyle.primary, custom_id="admin_manage_all_leaves")
     async def manage_all(self, it: discord.Interaction, b):
         d = load_json(DB_LEAVE, [])
         now_date = get_thai_time().date()
@@ -1167,6 +1167,7 @@ class LeaveCategorySelect(discord.ui.Select):
 @commands.has_any_role("Admin", "ผู้ดูแล")
 async def admin(ctx):
     await ctx.send(embed=discord.Embed(title="🕹 Dark Monday Admin Panel"), view=AdminPanelView())
+
 
 # --- 9. ระบบ Backup (ส่งข้อมูล 2 ไฟล์ให้แอดมินทุกคน) ---
 @bot.command()
