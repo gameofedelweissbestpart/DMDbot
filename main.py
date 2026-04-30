@@ -394,10 +394,14 @@ class AdminPanelView(discord.ui.View):
         # เรียกหน้าเลือกหมวดหมู่
         await it.response.send_message("📂 **เลือกหมวดหมู่ที่ต้องการจัดการ:**", view=CategorySelectionView(), ephemeral=True)
 
-    # ปุ่มใหม่สีฟ้าสำหรับเข้าสู่ระบบจัดการใบลา
     @discord.ui.button(label="📋 ระบบลา", style=discord.ButtonStyle.primary, custom_id="admin_leave_system_main")
     async def leave_system(self, it: discord.Interaction, b):
-        await it.response.edit_message(content="📑 **เมนูจัดการระบบลา:** เลือกการดำเนินการที่ต้องการ", view=AdminLeaveManagementView())    
+        # แก้ไขจาก it.response.edit_message เป็น it.response.send_message
+        # และเพิ่ม ephemeral=True เข้าไปครับ
+        await it.response.send_message(
+            content="📑 **เมนูจัดการระบบลา:** เลือกการดำเนินการที่ต้องการ", 
+            view=AdminLeaveManagementView(), 
+            ephemeral=True    
     
     # กฎข้อที่ 13: ปุ่มล้างข้อมูลทั้งหมด
     @discord.ui.button(label="🗑️ ล้างข้อมูลใบลา", style=discord.ButtonStyle.danger, custom_id="admin_clear_leave")
@@ -471,7 +475,7 @@ class AdminActionSelect(discord.ui.Select):
 
 class AdminFinalActionView(discord.ui.View):
     def __init__(self, idx, od):
-        super().__init__(timeout=60)
+        super().__init__(timeout=None)
         self.idx, self.od = idx, od
 
     @discord.ui.button(label="✏️ แก้ไขวันสิ้นสุด", style=discord.ButtonStyle.primary)
@@ -479,13 +483,25 @@ class AdminFinalActionView(discord.ui.View):
         # เรียกใช้เมนูแก้ไขวันลาที่มีอยู่แล้วในโค้ดของคุณ[cite: 3]
         await it.response.edit_message(content="📅 **เลือกวันที่สิ้นสุดใหม่ (Admin):**", embed=None, view=SubMenuView(it, EditDateSelect(self.idx, self.od, it)))
 
-    @discord.ui.button(label="📝 แก้ไขประเภท/เหตุผล", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="📝 แก้ไขประเภท/เหตุผล", style=discord.ButtonStyle.secondary, custom_id="admin_edit_details")
     async def edit_details(self, it, b):
+        # เรียกใช้ Modal สำหรับการแก้ไขแบบละเอียด (Super Admin) ที่เราเพิ่งสร้างไป
         await it.response.send_modal(AdminEditDetailsModal(self.idx, self.od))
 
     @discord.ui.button(label="🛑 ยกเลิกใบลานี้", style=discord.ButtonStyle.danger)
     async def cancel(self, it, b):
-        await it.response.send_modal(CancelReasonModal(self.idx, self.od))        
+        await it.response.send_modal(CancelReasonModal(self.idx, self.od))
+
+    # --- ปุ่มย้อนกลับที่เพิ่มเข้ามาใหม่ ---
+    @discord.ui.button(label="🔙 ย้อนกลับ", style=discord.ButtonStyle.secondary, custom_id="admin_back_to_select_leave", row=1)
+    async def back(self, it: discord.Interaction, b):
+        # ทำการเรียกฟังก์ชันจัดการใบลาทั้งหมดใหม่ เพื่อให้แอดมินเห็นรายการเลือกอีกครั้ง
+        # โดยการส่ง View ที่ชื่อ AdminLeaveManagementView() กลับไป
+        await it.response.edit_message(
+        content="🛠 **แอดมินจัดการใบลา:** เลือกรายการที่ต้องการจัดการอีกครั้ง:", 
+        embed=None, 
+        view=AdminLeaveManagementView()
+    )            
 
 class AdminEditDetailsModal(discord.ui.Modal):
     def __init__(self, idx, od):
@@ -1151,7 +1167,6 @@ class LeaveCategorySelect(discord.ui.Select):
 @commands.has_any_role("Admin", "ผู้ดูแล")
 async def admin(ctx):
     await ctx.send(embed=discord.Embed(title="🕹 Dark Monday Admin Panel"), view=AdminPanelView())
-
 
 # --- 9. ระบบ Backup (ส่งข้อมูล 2 ไฟล์ให้แอดมินทุกคน) ---
 @bot.command()
