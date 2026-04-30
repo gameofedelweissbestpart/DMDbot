@@ -56,8 +56,8 @@ class RealtimeRefreshView(discord.ui.View):
         await asyncio.sleep(3) # รอ 3 วินาทีแล้วสั่งทำลายข้อความลับนั้นทิ้ง
         await it.delete_original_response()
 
-# --- 2. ระบบตาราง Real-time (ปรับหัวข้อตามสั่ง) ---
 # --- 2. ระบบตาราง Real-time (อัปเดต: นับจำนวนคนลาแบบไม่ซ้ำ) ---
+# --- 2. ระบบตาราง Real-time (ฉบับอัปเกรด: จัดกลุ่มสมาชิก + ไอคอน 👤/📄 + ระยะร่น) ---
 async def update_summary_board():
     cfg = load_json(CONFIG_PATH, {})
     ch_id = cfg.get("realtime_ch")
@@ -69,21 +69,61 @@ async def update_summary_board():
     
     data = load_json(DB_LEAVE, [])
     now = get_thai_time().date()
-    active = []
-    unique_users = set() # ใช้ set เก็บ ID เพื่อไม่ให้เกิดค่าซ้ำ
     
-    for e in data:
+    # [1] จัดกลุ่มข้อมูลใบลาตาม target_id (เฉพาะรายการที่ลาตรงกับวันนี้)
+    grouped_data = {}
+    for entry in data:
         try:
-            start_dt = datetime.strptime(e['start_date'], "%d/%m/%Y").date()
-            end_dt = datetime.strptime(e['end_date'], "%d/%m/%Y").date()
+            start_dt = datetime.strptime(entry['start_date'], "%d/%m/%Y").date()
+            end_dt = datetime.strptime(entry['end_date'], "%d/%m/%Y").date()
             if start_dt <= now <= end_dt:
-                active.append(e) # เก็บทุกรายการเพื่อโชว์รายละเอียดปกติ
-                unique_users.add(e['target_id']) # บันทึก ID สมาชิกที่ลา (ซ้ำก็นับเป็น 1)
+                tid = entry['target_id']
+                if tid not in grouped_data:
+                    grouped_data[tid] = []
+                grouped_data[tid].append(entry)
         except:
             continue
 
     desc = f"# 📋 รายชื่อสมาชิกที่แจ้งลา (Real-time)\n{LONG_SEP}\n\n"
     em = discord.Embed(description=desc, color=0x2B2D31)
+    
+    if not grouped_data:
+        desc += "> 🍃 **ขณะนี้ยังไม่มีสมาชิกแจ้งลาในระบบ**\n\n"
+    else:
+        # [2] วนลูปตามกลุ่มสมาชิก (👤)
+        for target_id, leaves in grouped_data.items():
+            desc += f"👤 <@{target_id}>\n"
+            
+            # [3] วนลูปตามรายการใบลาของคนนั้น (📄)
+            for leaf in leaves:
+                dr = leaf['start_date'] if leaf['start_date'] == leaf['end_date'] else f"{leaf['start_date']} - {leaf['end_date']}"
+                desc += f"📄 `[{leaf.get('leave_category','ทั่วไป')}]` วันที่: {dr} `(รวม {leaf.get('total_days', 1)} วัน)`\n"
+                
+                # เช็คการแจ้งแทนเพื่อใส่ในบรรทัดเหตุผล
+                on_behalf_txt = f" **(ผู้แจ้งแทน: <@{leaf['user_id']}>)**" if leaf['user_id'] != leaf['target_id'] else ""
+                
+                # [4] บรรทัดเหตุผล: ร่นระยะและใช้ └
+                desc += f"    └ **เหตุผล:** {leaf.get('reason', '-')}{on_behalf_txt}\n"
+            desc += "\n"
+        
+    desc += f"{LONG_SEP}\n"
+    # [5] นับจำนวนคนลาจากจำนวน Key ใน Dictionary (Unique Users)[cite: 1]
+    desc += f"**📊 สรุปจำนวนคนลาวันนี้: {len(grouped_data)} คน**\n"
+    desc += f"**📅 อัปเดตล่าสุด: {get_thai_time().strftime('%d/%m/%Y %H:%M น.')}**"
+    em.description = desc
+
+    # ส่วนการตรวจสอบข้อความเดิมเพื่อ Edit หรือ Send ใหม่ (คงเดิมตาม main_22.py)[cite: 1]
+    target = None
+    async for m in channel.history(limit=50):
+        if m.author == bot.user and m.embeds and len(m.embeds) > 0:
+            if m.embeds[0].description and "รายชื่อสมาชิกที่แจ้งลา (Real-time)" in m.embeds[0].description:
+                target = m
+                break
+    
+    if target:
+        await target.edit(embed=em, view=RealtimeRefreshView())
+    else:
+        await channel.send(embed=em, view=RealtimeRefreshView())
     
     if not active:
         desc += "> 🍃 **ขณะนี้ยังไม่มีสมาชิกแจ้งลาในระบบ**\n\n"
@@ -858,7 +898,7 @@ class CancelReasonModal(discord.ui.Modal):
                         f"• **ประเภทการลา:** {old_data.get('leave_category', 'ทั่วไป')}\n"
                         f"• **จำนวนวัน:** {old_data.get('total_days', 1)} วัน\n"
                         f"• **เหตุผลเดิม:** {old_data.get('reason', '-')}\n\n"
-                        f"**🛑 {note_label}:**\n> {self.reason.value}\n\n" # ใช้ตัวแปร note_label ที่นี่
+                        f"**🛑 {note_label}:** {self.reason.value}\n\n" # ใช้ตัวแปร note_label ที่นี่
                         f"{LONG_SEP}"
                     )
                     log_em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M:%S')}")
