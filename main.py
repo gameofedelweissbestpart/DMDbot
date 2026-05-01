@@ -94,20 +94,20 @@ async def update_summary_board():
         for target_id, leaves in grouped_data.items():
             desc += f"👤 <@{target_id}>\n"
             
-            # [3] วนลูปตามรายการใบลาของคนนั้น (🔹)
+            # [3] วนลูปตามรายการใบลาของคนนั้น
             for leaf in leaves:
                 dr = leaf['start_date'] if leaf['start_date'] == leaf['end_date'] else f"{leaf['start_date']} - {leaf['end_date']}"
-                desc += f"▫️ `[{leaf.get('leave_category','ทั่วไป')}]` วันที่: {dr} `(รวม {leaf.get('total_days', 1)} วัน)`\n"
+                desc += f"└ `[{leaf.get('leave_category','ทั่วไป')}]` วันที่: {dr} `(รวม {leaf.get('total_days', 1)} วัน)`\n"
                 
-                # เช็คการแจ้งแทนเพื่อใส่ในบรรทัดเหตุผล
+                # เช็คการแจ้งแทนเพื่อใส่ในบรรทัดเหตุผล[cite: 3]
                 on_behalf_txt = f" **(ผู้แจ้งแทน: <@{leaf['user_id']}>)**" if leaf['user_id'] != leaf['target_id'] else ""
                 
-                # [4] บรรทัดเหตุผล: ร่นระยะด้วยตัวอักษรล่องหนและใช้ └[cite: 3]
-                desc += f"\u17b5 \u17b5 \u17b5 \u17b5 \u17b5 \u17b5 \u17b5 └ **เหตุผล:** {leaf.get('reason', '-')}{on_behalf_txt}\n"
+                # [4] บรรทัดเหตุผล: ร่นระยะและใช้ └[cite: 3]
+                desc += f"\u17b5 \u17b5 └ **เหตุผล:** {leaf.get('reason', '-')}{on_behalf_txt}\n"
             desc += "\n"
         
     desc += f"{LONG_SEP}\n"
-    # [5] สรุปยอดรวมคนลา (Unique Users)[cite: 3]
+    # [5] สรุปยอดรวมคนลา (นับจากจำนวน Key ใน Dictionary)[cite: 3]
     desc += f"**📊 สรุปจำนวนคนลาวันนี้: {len(grouped_data)} คน**\n"
     desc += f"**📅 อัปเดตล่าสุด: {get_thai_time().strftime('%d/%m/%Y %H:%M น.')}**"
     em.description = desc
