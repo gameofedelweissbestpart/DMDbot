@@ -820,7 +820,7 @@ async def weekly_report_task():
 # if not weekly_report_task.is_running():
 #     weekly_report_task.start()
 
-# --- 6. ระบบยกเลิกใบลา (ปรับหัวข้อ Log และลบบรรทัดสถานะออก) ---
+# --- 6. ระบบยกเลิกใบลา (ฉบับปรับปรุง: ตัดชื่อผู้ดำเนินการตามเงื่อนไขที่คุณย้ำ) ---
 class CancelReasonModal(discord.ui.Modal):
     def __init__(self, target_idx, od, is_admin_request=False): 
         super().__init__(title="ระบุเหตุผลการยกเลิก")
@@ -841,37 +841,29 @@ class CancelReasonModal(discord.ui.Modal):
             log_ch_id = cfg.get("log_ch")
             if log_ch_id:
                 log_ch = bot.get_channel(int(log_ch_id))
-                if not log_ch:
-                    try: log_ch = await bot.fetch_channel(int(log_ch_id))
-                    except: log_ch = None
-
                 if log_ch:
-                    # [1] กำหนดสีและหัวข้อตามช่องทางการกด (is_admin_request)
+                    # [Step 1] กำหนดค่าแสดงผลตามช่องทางที่กด
                     log_title = "📌 บันทึกการจัดการโดยผู้ดูแล (ยกเลิกใบลา)" if self.is_admin_request else "📌 บันทึกยกเลิกการแจ้งลา"
                     log_color = 0xe67e22 if self.is_admin_request else 0xe74c3c 
-                    
-                    # [2] กำหนดหัวข้อหมายเหตุตามความต้องการใหม่
                     note_label = "หมายเหตุจากแอดมิน" if self.is_admin_request else "หมายเหตุ"
+                    
+                    # ตรรกะ: ถ้ากดจากปุ่มปกติ (แม้จะเป็นแอดมินกด) executor_txt จะเป็นค่าว่าง
+                    executor_txt = f"**👮 ผู้ดำเนินการ:** {it.user.display_name} (Admin)\n" if self.is_admin_request else ""
                     
                     target_member = it.guild.get_member(int(old_data['target_id']))
                     tn = target_member.display_name if target_member else old_data['name']
-                    
-                    log_em = discord.Embed(title=log_title, color=log_color)
-                    
-                    # ตรวจสอบสถานะแอดมินของผู้กดเพื่อใส่ Tag (เฉพาะเมื่อกดจากเมนูแอดมิน)
-                    admin_tag = " (Admin)" if self.is_admin_request else ""
-                    executor_label = "👮 ผู้ดำเนินการ" if self.is_admin_request else "👤 ผู้ดำเนินการ"
-                    
                     dr = old_data['start_date'] if old_data['start_date'] == old_data['end_date'] else f"{old_data['start_date']} - {old_data['end_date']}"
+                    
+                    # [Step 2] ประกอบ Embed (ยึดตามไฟล์ New Text Document_3.txt)
+                    log_em = discord.Embed(title=log_title, color=log_color)
                     log_em.description = (
-                        f"**👤 สมาชิกที่ลา:** {tn}\n"
-                        f"**{executor_label}:** {it.user.display_name}{admin_tag}\n\n"
+                        f"**👤 สมาชิกที่ลา:** {tn}\n\n"
+                        f"{executor_txt}" # จะหายไปทันทีถ้าเป็นการกดผ่านปุ่มยกเลิกปกติ
                         f"**📝 รายละเอียดรายการที่ถูกยกเลิก:**\n"
-                        f"• **วันที่ลา:** {dr}\n"
-                        f"• **ประเภทการลา:** {old_data.get('leave_category', 'ทั่วไป')}\n"
-                        f"• **จำนวนวัน:** {old_data.get('total_days', 1)} วัน\n"
-                        f"• **เหตุผลเดิม:** {old_data.get('reason', '-')}\n\n"
-                        f"**🛑 {note_label}:** {self.reason.value}\n\n" # ใช้ตัวแปร note_label ที่นี่
+                        f" • **วันที่ลา:** {dr} `({old_data.get('total_days', 1)} วัน)`\n"
+                        f" • **ประเภท:** {old_data.get('leave_category', 'ทั่วไป')}\n"
+                        f" • **เหตุผลเดิม:** {old_data.get('reason', '-')}\n\n"
+                        f"**🛑 {note_label}:** {self.reason.value}\n\n"
                         f"{LONG_SEP}"
                     )
                     log_em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M:%S')}")
