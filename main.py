@@ -57,9 +57,7 @@ class RealtimeRefreshView(discord.ui.View):
         await asyncio.sleep(3) # รอ 3 วินาทีแล้วสั่งทำลายข้อความลับนั้นทิ้ง
         await it.delete_original_response()
 
-# --- 2. ระบบตาราง Real-time (อัปเดต: นับจำนวนคนลาแบบไม่ซ้ำ) ---
-# --- 2. ระบบตาราง Real-time (ฉบับอัปเกรด: จัดกลุ่มสมาชิก + ไอคอน 👤/📄 + ระยะร่น) ---
-# --- 2. ระบบตาราง Real-time (ฉบับแก้ไข Bug และลบโค้ดส่วนเกิน) ---
+# --- 2. ระบบตาราง Real-time (ฉบับแก้ไข Bug ข้อความค้าง) ---
 async def update_summary_board():
     cfg = load_json(CONFIG_PATH, {})
     ch_id = cfg.get("realtime_ch")
@@ -72,7 +70,7 @@ async def update_summary_board():
     data = load_json(DB_LEAVE, [])
     now = get_thai_time().date()
     
-    # [1] จัดกลุ่มข้อมูลใบลาตาม target_id (เฉพาะรายการที่ตรงกับวันนี้)
+    # [1] จัดกลุ่มข้อมูลใบลาตาม target_id (เฉพาะรายการที่ลาอยู่ในวันนี้)
     grouped_data = {}
     for entry in data:
         try:
@@ -96,26 +94,25 @@ async def update_summary_board():
         for target_id, leaves in grouped_data.items():
             desc += f"👤 <@{target_id}>\n"
             
-            # [3] วนลูปตามรายการใบลาของคนนั้น
+            # [3] วนลูปตามรายการใบลาของคนนั้น (📄)
             for leaf in leaves:
                 dr = leaf['start_date'] if leaf['start_date'] == leaf['end_date'] else f"{leaf['start_date']} - {leaf['end_date']}"
-                # ใช้ \u17b5 เพื่อร่นระยะประเภทการลา
-                desc += f"\u17b5 \u17b5 \u17b5 \u17b5 \u17b5 \u17b5 `[{leaf.get('leave_category','ทั่วไป')}]` วันที่: {dr} `(รวม {leaf.get('total_days', 1)} วัน)`\n"
+                desc += f"📄 `[{leaf.get('leave_category','ทั่วไป')}]` วันที่: {dr} `(รวม {leaf.get('total_days', 1)} วัน)`\n"
                 
-                # เช็คการแจ้งแทนเพื่อใส่ในบรรทัดเหตุผล[cite: 2]
+                # เช็คการแจ้งแทนเพื่อใส่ในบรรทัดเหตุผล
                 on_behalf_txt = f" **(ผู้แจ้งแทน: <@{leaf['user_id']}>)**" if leaf['user_id'] != leaf['target_id'] else ""
                 
-                # [4] บรรทัดเหตุผล: ร่นระยะและใช้ └ ด้วย \u17b5[cite: 2]
-                desc += f"\u17b5 \u17b5 \u17b5 \u17b5 \u17b5 \u17b5 \u17b5 \u17b5 \u17b5 └ **เหตุผล:** {leaf.get('reason', '-')}{on_behalf_txt}\n"
+                # [4] บรรทัดเหตุผล: ร่นระยะและใช้ └
+                desc += f"\u17b5 \u17b5 \u17b5 \u17b5 \u17b5 \u17b5 \u17b5 └ **เหตุผล:** {leaf.get('reason', '-')}{on_behalf_txt}\n"
             desc += "\n"
         
     desc += f"{LONG_SEP}\n"
-    # [5] นับจำนวนคนลาจากจำนวน Key ใน Dictionary (Unique Users)[cite: 2]
+    # [5] สรุปยอดรวมจากจำนวนกลุ่มสมาชิก
     desc += f"**📊 สรุปจำนวนคนลาวันนี้: {len(grouped_data)} คน**\n"
     desc += f"**📅 อัปเดตล่าสุด: {get_thai_time().strftime('%d/%m/%Y %H:%M น.')}**"
     em.description = desc
 
-    # ค้นหาข้อความบอร์ดเดิมเพื่อแก้ไข หรือส่งใหม่[cite: 2]
+    # ตรวจสอบว่ามีข้อความบอร์ดอยู่แล้วหรือไม่เพื่อ Edit หรือ Send ใหม่
     target = None
     async for m in channel.history(limit=50):
         if m.author == bot.user and m.embeds and len(m.embeds) > 0:
