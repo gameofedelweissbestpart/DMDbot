@@ -44,7 +44,7 @@ def validate_date(d_str):
     except:
         return False
 
-#ปุ่มรีเฟรช refresh
+#รีเฟรช refresh
 class RealtimeRefreshView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -69,50 +69,40 @@ async def update_summary_board():
     
     data = load_json(DB_LEAVE, [])
     now = get_thai_time().date()
+    active = []
+    unique_users = set() # ใช้ set เก็บ ID เพื่อไม่ให้เกิดค่าซ้ำ
     
-    # [1] จัดกลุ่มข้อมูลใบลาตาม target_id (เฉพาะรายการที่ตรงกับวันนี้)
-    grouped_data = {}
-    for entry in data:
+    for e in data:
         try:
-            start_dt = datetime.strptime(entry['start_date'], "%d/%m/%Y").date()
-            end_dt = datetime.strptime(entry['end_date'], "%d/%m/%Y").date()
+            start_dt = datetime.strptime(e['start_date'], "%d/%m/%Y").date()
+            end_dt = datetime.strptime(e['end_date'], "%d/%m/%Y").date()
             if start_dt <= now <= end_dt:
-                tid = entry['target_id']
-                if tid not in grouped_data:
-                    grouped_data[tid] = []
-                grouped_data[tid].append(entry)
+                active.append(e) # เก็บทุกรายการเพื่อโชว์รายละเอียดปกติ
+                unique_users.add(e['target_id']) # บันทึก ID สมาชิกที่ลา (ซ้ำก็นับเป็น 1)
         except:
             continue
 
     desc = f"# 📋 รายชื่อสมาชิกที่แจ้งลา (Real-time)\n{LONG_SEP}\n\n"
     em = discord.Embed(description=desc, color=0x2B2D31)
     
-    if not grouped_data:
+    if not active:
         desc += "> 🍃 **ขณะนี้ยังไม่มีสมาชิกแจ้งลาในระบบ**\n\n"
     else:
-        # [2] วนลูปตามกลุ่มสมาชิก (👤)
-        for target_id, leaves in grouped_data.items():
-            desc += f"👤 <@{target_id}>\n"
-            
-            # [3] วนลูปตามรายการใบลาของคนนั้น (🔹)
-            for leaf in leaves:
-                dr = leaf['start_date'] if leaf['start_date'] == leaf['end_date'] else f"{leaf['start_date']} - {leaf['end_date']}"
-                desc += f"🔹 `[{leaf.get('leave_category','ทั่วไป')}]` วันที่: {dr} `(รวม {leaf.get('total_days', 1)} วัน)`\n"
-                
-                # เช็คการแจ้งแทนเพื่อใส่ในบรรทัดเหตุผล
-                on_behalf_txt = f" **(ผู้แจ้งแทน: <@{leaf['user_id']}>)**" if leaf['user_id'] != leaf['target_id'] else ""
-                
-                # [4] บรรทัดเหตุผล: ร่นระยะและใช้ └[cite: 3]
-                desc += f"└ **เหตุผล:** {leaf.get('reason', '-')}{on_behalf_txt}\n"
+        for e in active:
+            desc += f"🔹 <@{e['target_id']}> `[{e.get('leave_category','ทั่วไป')}]`\n"
+            dr = e['start_date'] if e['start_date'] == e['end_date'] else f"{e['start_date']} - {e['end_date']}"
+            desc += f"└ **วันที่ลา:** {dr} `(รวม {e['total_days']} วัน)`\n"
+            desc += f"└ **เหตุผลที่ลา:** {e['reason']}\n"
+            if e['user_id'] != e['target_id']:
+                desc += f"└ **ผู้แจ้งแทน:** <@{e['user_id']}>\n"
             desc += "\n"
         
     desc += f"{LONG_SEP}\n"
-    # [5] สรุปยอดรวมคนลา (นับจากจำนวน Key ใน Dictionary)[cite: 3]
-    desc += f"**📊 สรุปจำนวนคนลาวันนี้: {len(grouped_data)} คน**\n"
+    # เปลี่ยนมานับจำนวนจาก unique_users แทน active
+    desc += f"**📊 สรุปจำนวนคนลาวันนี้: {len(unique_users)} คน**\n"
     desc += f"**📅 อัปเดตล่าสุด: {get_thai_time().strftime('%d/%m/%Y %H:%M น.')}**"
     em.description = desc
 
-    # ค้นหาข้อความบอร์ดเดิมเพื่อ Edit หรือ Send ใหม่[cite: 3]
     target = None
     async for m in channel.history(limit=50):
         if m.author == bot.user and m.embeds and len(m.embeds) > 0:
