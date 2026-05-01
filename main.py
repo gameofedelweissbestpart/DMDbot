@@ -1212,7 +1212,7 @@ async def backup(ctx):
                 continue
     await ctx.send(f"✅ ส่งไฟล์ Backup เข้า DM ของแอดมินทั้งหมด {count} ท่านเรียบร้อยแล้ว")
 
-# --- ย้าย on_ready มาไว้ท้ายสุด และใส่ add_view ให้ครบ ---
+# --- ย้าย on_ready มาไว้ท้ายสุด และใส่ add_view ให้ครบ ----
 @bot.event
 async def on_ready():
     # ลงทะเบียน View ทั้งหมดเพื่อให้ปุ่มทำงานได้ตลอดกาล (Persistent Views)
