@@ -43,7 +43,6 @@ def validate_date(d_str):
         return True
     except:
         return False
-
 #รีเฟรช refresh
 class RealtimeRefreshView(discord.ui.View):
     def __init__(self):
@@ -57,7 +56,8 @@ class RealtimeRefreshView(discord.ui.View):
         await asyncio.sleep(3) # รอ 3 วินาทีแล้วสั่งทำลายข้อความลับนั้นทิ้ง
         await it.delete_original_response()
 
-# --- 2. ระบบตาราง Real-time (ฉบับแก้ไข Bug ข้อความค้าง - Clean & Grouped) ---
+# --- 2. ระบบตาราง Real-time (ปรับหัวข้อตามสั่ง) ---
+# --- 2. ระบบตาราง Real-time (อัปเดต: นับจำนวนคนลาแบบไม่ซ้ำ) ---
 async def update_summary_board():
     cfg = load_json(CONFIG_PATH, {})
     ch_id = cfg.get("realtime_ch")
@@ -84,36 +84,6 @@ async def update_summary_board():
 
     desc = f"# 📋 รายชื่อสมาชิกที่แจ้งลา (Real-time)\n{LONG_SEP}\n\n"
     em = discord.Embed(description=desc, color=0x2B2D31)
-    
-    if not active:
-        desc += "> 🍃 **ขณะนี้ยังไม่มีสมาชิกแจ้งลาในระบบ**\n\n"
-    else:
-        for e in active:
-            desc += f"🔹 <@{e['target_id']}> `[{e.get('leave_category','ทั่วไป')}]`\n"
-            dr = e['start_date'] if e['start_date'] == e['end_date'] else f"{e['start_date']} - {e['end_date']}"
-            desc += f"└ **วันที่ลา:** {dr} `(รวม {e['total_days']} วัน)`\n"
-            desc += f"└ **เหตุผลที่ลา:** {e['reason']}\n"
-            if e['user_id'] != e['target_id']:
-                desc += f"└ **ผู้แจ้งแทน:** <@{e['user_id']}>\n"
-            desc += "\n"
-        
-    desc += f"{LONG_SEP}\n"
-    # เปลี่ยนมานับจำนวนจาก unique_users แทน active
-    desc += f"**📊 สรุปจำนวนคนลาวันนี้: {len(unique_users)} คน**\n"
-    desc += f"**📅 อัปเดตล่าสุด: {get_thai_time().strftime('%d/%m/%Y %H:%M น.')}**"
-    em.description = desc
-
-    target = None
-    async for m in channel.history(limit=50):
-        if m.author == bot.user and m.embeds and len(m.embeds) > 0:
-            if m.embeds[0].description and "รายชื่อสมาชิกที่แจ้งลา (Real-time)" in m.embeds[0].description:
-                target = m
-                break
-    
-    if target:
-        await target.edit(embed=em, view=RealtimeRefreshView())
-    else:
-        await channel.send(embed=em, view=RealtimeRefreshView())
     
     if not active:
         desc += "> 🍃 **ขณะนี้ยังไม่มีสมาชิกแจ้งลาในระบบ**\n\n"
