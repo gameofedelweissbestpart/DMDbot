@@ -43,18 +43,27 @@ def validate_date(d_str):
         return True
     except:
         return False
-#รีเฟรช refresh
+
+#ปุ่มรีเฟรช refresh
 class RealtimeRefreshView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
     @discord.ui.button(label="🔄 กดอัปเดตข้อมูลล่าสุด", style=discord.ButtonStyle.success, custom_id="refresh_realtime_board")
     async def refresh_board(self, it: discord.Interaction, b: discord.ui.Button):
-        await it.response.send_message("🔄 กำลังอัปเดตข้อมูลบนบอร์ด...", ephemeral=True) # 1. จองคิวการตอบกลับแบบเห็นคนเดียว
-        await update_summary_board() # เรียกตัวเองเพื่ออัปเดตข้อมูล
-        await it.edit_original_response(content="✅ อัปเดตข้อมูลบนบอร์ดให้เป็นล่าสุดเรียบร้อยแล้ว!")
-        await asyncio.sleep(3) # รอ 3 วินาทีแล้วสั่งทำลายข้อความลับนั้นทิ้ง
-        await it.delete_original_response()
+        # 1. ส่งข้อความลับแจ้งว่าเริ่มทำงาน
+        await it.response.send_message("🔄 กำลังอัปเดตข้อมูลบนบอร์ด...", ephemeral=True)        
+        # 2. รันฟังก์ชันอัปเดตบอร์ด
+        await update_summary_board()        
+        # 3. แก้ไขข้อความเดิมเพื่อแจ้งว่าเสร็จแล้ว
+        await it.edit_original_response(content="✅ อัปเดตข้อมูลบนบอร์ดให้เป็นล่าสุดเรียบร้อยแล้ว!")        
+        # 4. รอ 3 วินาทีแล้วลบข้อความทิ้งอัตโนมัติ
+        await asyncio.sleep(3)
+        try:
+            await it.delete_original_response()
+        except Exception as e:
+            # ป้องกัน Error กรณีผู้ใช้กด "ปิดข้อความ" ไปก่อนเอง
+            print(f"Log: ไม่สามารถลบข้อความลับได้เนื่องจาก {e}")
 
 # --- 2. ระบบตาราง Real-time (อัปเดต: นับจำนวนคนลาแบบไม่ซ้ำ) ---
 # --- 2. ระบบตาราง Real-time (ฉบับอัปเกรด: จัดกลุ่มสมาชิก + ไอคอน 👤/📄 + ระยะร่น) ---
@@ -94,16 +103,17 @@ async def update_summary_board():
         for target_id, leaves in grouped_data.items():
             desc += f"👤 <@{target_id}>\n"
             
-            # [3] วนลูปตามรายการใบลาของคนนั้น (📄)
+            # [3] วนลูปตามรายการใบลาของคนนั้น (🔹)
             for leaf in leaves:
                 dr = leaf['start_date'] if leaf['start_date'] == leaf['end_date'] else f"{leaf['start_date']} - {leaf['end_date']}"
-                desc += f"📄 `[{leaf.get('leave_category','ทั่วไป')}]` วันที่: {dr} `(รวม {leaf.get('total_days', 1)} วัน)`\n"
+                desc += f"🔹 `[{leaf.get('leave_category','ทั่วไป')}]` วันที่: {dr} `(รวม {leaf.get('total_days', 1)} วัน)`\n"
                 
                 # เช็คการแจ้งแทนเพื่อใส่ในบรรทัดเหตุผล
                 on_behalf_txt = f" **(ผู้แจ้งแทน: <@{leaf['user_id']}>)**" if leaf['user_id'] != leaf['target_id'] else ""
                 
                 # [4] บรรทัดเหตุผล: ร่นระยะและใช้ └
-                desc += f"    └ **เหตุผล:** {leaf.get('reason', '-')}{on_behalf_txt}\n"
+                # เป็นแบบนี้ (ใช้ \u17b5 นำหน้าเพื่อให้ Discord ไม่ตัดช่องว่าง):
+                desc += f"\u17b5 \u17b5 \u17b5 \u17b5 └ **เหตุผล:** {leaf.get('reason', '-')}{on_behalf_txt}\n"
             desc += "\n"
         
     desc += f"{LONG_SEP}\n"
