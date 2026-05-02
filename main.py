@@ -578,6 +578,7 @@ class AdminEditCategorySelect(discord.ui.Select):
         # ส่งต่อไปยัง Modal แก้ไขรายละเอียด (ซึ่งเราได้แก้ Logic แยกไฟล์ไว้แล้วในขั้นตอนก่อนหน้า)[cite: 1]
         await it.response.send_modal(AdminEditDetailsModal(self.idx, self.od, final_cat))
 
+# --- แก้ไข Logic ใน AdminEditDetailsModal (คำเดิม 100% + เพิ่มเงื่อนไข (คงเดิม)) ---
 class AdminEditDetailsModal(discord.ui.Modal):
     def __init__(self, idx, od, selected_cat):
         super().__init__(title="แก้ไขใบลาแบบละเอียด (Admin)")
@@ -595,8 +596,6 @@ class AdminEditDetailsModal(discord.ui.Modal):
 
     async def on_submit(self, it: discord.Interaction):
         await it.response.defer(ephemeral=True)
-        
-        # --- ระบุ ID เซิร์ฟเวอร์ปัจจุบันเพื่อแยกไฟล์ ---
         gid = str(it.guild.id)
         
         new_s = self.s_i.value.strip()
@@ -607,17 +606,14 @@ class AdminEditDetailsModal(discord.ui.Modal):
         if not validate_date(new_s) or not validate_date(new_e):
             return await it.followup.send("❌ รูปแบบวันที่ไม่ถูกต้อง! (วว/ดด/ปปปป)", ephemeral=True)
 
-        # --- แก้ Logic: โหลดข้อมูลแยกไฟล์ตาม Guild ---
         d = load_data(gid, "leaves", []) 
         if 0 <= self.idx < len(d):
             entry = d[self.idx]
-            
             old_s, old_e = entry['start_date'], entry['end_date']
             old_cat = entry.get('leave_category', 'ทั่วไป')
             old_days = entry.get('total_days', 1)
             old_reason = entry.get('reason', '-')
             
-            # --- คงคำพูดและลำดับเดิมตามที่คุณแจ้งไว้เป๊ะๆ ---
             try:
                 s_dt = datetime.strptime(new_s, "%d/%m/%Y").date()
                 e_dt = datetime.strptime(new_e, "%d/%m/%Y").date()
@@ -627,6 +623,23 @@ class AdminEditDetailsModal(discord.ui.Modal):
             except:
                 return await it.followup.send("❌ เกิดข้อผิดพลาดในการคำนวณวันที่!", ephemeral=True)
 
+            # --- [เริ่มต้น Logic เปรียบเทียบตามเงื่อนไขใหม่] ---
+            # 1. วันที่ลา
+            if old_s == new_s and old_e == new_e:
+                date_txt = f"`{old_s}-{old_e}` (คงเดิม)"
+            else:
+                date_txt = f"`{old_s}-{old_e}` ➔ **`{new_s}-{new_e}`**"
+
+            # 2. ประเภทการลา
+            cat_txt = f"`{old_cat}` (คงเดิม)" if old_cat == self.selected_cat else f"`{old_cat}` ➔ **`{self.selected_cat}`**"
+            
+            # 3. จำนวนวัน
+            days_txt = f"`{old_days}` วัน (คงเดิม)" if old_days == new_days else f"`{old_days}` ➔ **`{new_days}` วัน**"
+            
+            # 4. เหตุผล
+            reason_txt = f"`{old_reason}` (คงเดิม)" if old_reason == new_reason else f"`{old_reason}` ➔ **`{new_reason}`**"
+            # --- [จบ Logic เปรียบเทียบ] ---
+
             entry.update({
                 "start_date": new_s, 
                 "end_date": new_e,
@@ -635,11 +648,9 @@ class AdminEditDetailsModal(discord.ui.Modal):
                 "reason": new_reason
             })
             
-            # --- แก้ Logic: บันทึกข้อมูลแยกไฟล์ตาม Guild ---
             save_data(gid, "leaves", d) 
             await update_summary_board(it.guild)
             
-            # --- ดึงห้อง Log จากไฟล์ Config แยกตาม Guild ---
             cfg = load_data(gid, "config", {}) 
             log_ch_id = cfg.get("log_ch")
             if log_ch_id:
@@ -649,15 +660,15 @@ class AdminEditDetailsModal(discord.ui.Modal):
                     tn = target_m.display_name if target_m else self.od['name']
                     
                     em = discord.Embed(title="📌 บันทึกการจัดการโดยผู้ดูแล (แก้ไขใบลา)", color=0xe67e22)
-                    # --- คงรูปแบบ Embed Description และคำพูดเดิม ---
+                    # ใช้คำพูดเดิม 100% แทรกตัวแปรที่มี Logic ใหม่เข้าไป
                     em.description = (
                         f"**👤 สมาชิกที่ลา:** {tn}\n"
                         f"**👮 ผู้ดำเนินการ:** {it.user.display_name} (Admin)\n\n"
                         f"**🔄 รายละเอียดการเปลี่ยนแปลง:**\n"
-                        f"• **วันที่ลา:** `{old_s}-{old_e}` ➔ **`{new_s}-{new_e}`**\n"
-                        f"• **ประเภทการลา:** `{old_cat}` ➔ **`{self.selected_cat}`**\n"
-                        f"• **จำนวนวัน:** `{old_days}` ➔ **`{new_days}` วัน**\n"
-                        f"• **เหตุผล:** `{old_reason}` ➔ **`{new_reason}`**\n\n"
+                        f"• **วันที่ลา:** {date_txt}\n"
+                        f"• **ประเภทการลา:** {cat_txt}\n"
+                        f"• **จำนวนวัน:** {days_txt}\n"
+                        f"• **เหตุผล:** {reason_txt}\n\n"
                         f"**🛑 หมายเหตุจากแอดมิน:** {admin_note}\n\n"
                         f"{LONG_SEP}"
                     )
@@ -720,7 +731,7 @@ async def daily_report_task():
                     )
 
                     if not daily_grouped:
-                        em.description += "\n> 🍃 **เมื่อวานนี้ไม่มีสมาชิกแจ้งลาในระบบ**"
+                        em.description += "\n\n 🍃 **เมื่อวานนี้ไม่มีสมาชิกแจ้งลาในระบบ**"
                     else:
                         msg = ""
                         for tid, leaves in daily_grouped.items():
@@ -874,10 +885,22 @@ class CancelReasonModal(discord.ui.Modal):
             if log_ch_id:
                 log_ch = bot.get_channel(int(log_ch_id))
                 if log_ch:
+                    # --- [เพิ่ม Logic ตรวจสอบผู้ดำเนินการ โดยไม่เปลี่ยนคำเดิม] ---
+                    u_id = str(it.user.id)
+                    target_uid = old_data['target_id']
+                    executor_name = it.user.display_name
+                    
+                    # ตรวจสอบว่าเป็น Admin หรือ เป็นการยกเลิกแทนเพื่อน
+                    if self.is_admin_request:
+                        executor_txt = f"**👮 ผู้ดำเนินการ:** {executor_name} (Admin)\n\n"
+                    elif u_id != target_uid:
+                        executor_txt = f"**👤 ผู้ดำเนินการ (ยกเลิกแทน):** {executor_name}\n\n"
+                    else:
+                        executor_txt = "" # ถ้าเจ้าของยกเลิกเอง ไม่ต้องแสดงบรรทัดนี้
+
                     log_title = "📌 บันทึกการจัดการโดยผู้ดูแล (ยกเลิกใบลา)" if self.is_admin_request else "📌 บันทึกยกเลิกการแจ้งลา"
                     log_color = 0xe67e22 if self.is_admin_request else 0xe74c3c 
                     note_label = "หมายเหตุจากแอดมิน" if self.is_admin_request else "หมายเหตุ"
-                    executor_txt = f"**👮 ผู้ดำเนินการ:** {it.user.display_name} (Admin)\n" if self.is_admin_request else ""
                     
                     target_member = it.guild.get_member(int(old_data['target_id']))
                     tn = target_member.display_name if target_member else old_data['name']
@@ -885,8 +908,8 @@ class CancelReasonModal(discord.ui.Modal):
                     
                     log_em = discord.Embed(title=log_title, color=log_color)
                     log_em.description = (
-                        f"**👤 สมาชิกที่ลา:** {tn}\n\n"
-                        f"{executor_txt}"
+                        f"**👤 สมาชิกที่ลา:** {tn}\n"
+                        f"{executor_txt}" # แทรก Logic ผู้ดำเนินการตรงนี้ โดยคำอื่นยังอยู่ครบ
                         f"**📝 รายละเอียดรายการที่ถูกยกเลิก:**\n"
                         f" • **วันที่ลา:** {dr} `({old_data.get('total_days', 1)} วัน)`\n"
                         f" • **ประเภท:** {old_data.get('leave_category', 'ทั่วไป')}\n"
@@ -969,7 +992,7 @@ async def process_edit_leave(it, idx, od, new_end_str, edit_reason="-"):
                 executor_name = it.user.display_name
                 
                 log_em = discord.Embed(title=log_title, color=log_color)
-                on_behalf = f"\n**👮 ผู้แจ้งแก้ไขแทน:** {executor_name} (Admin)" if is_admin_action else f"\n**👤 ผู้แจ้งแก้ไขแทน:** {executor_name} (ผู้แจ้งลาแทน)" if u_id != od['target_id'] else ""
+                on_behalf = f"\n**👮 ผู้แจ้งแก้ไขแทน:** {executor_name} (Admin)" if is_admin_action else f"\n**👤 ผู้แจ้งแก้ไขแทน:** {executor_name}" if u_id != od['target_id'] else ""
                 
                 log_em.description = (
                     f"**👤 สมาชิกที่ลา:** {target_name}{on_behalf}\n\n"
@@ -982,12 +1005,15 @@ async def process_edit_leave(it, idx, od, new_end_str, edit_reason="-"):
                     f"{LONG_SEP}"
                 )
                 log_em.set_footer(text=f"บันทึกเมื่อ: {get_thai_time().strftime('%d/%m/%Y %H:%M')} น.")
-                await log_ch.send(embed=em)
+                await log_ch.send(embed=log_em) 
         
-        await it.edit_original_response(content=f"✏️ แก้ไขข้อมูลการลาเรียบร้อยแล้ว!", embed=None, view=None)
-        await asyncio.sleep(3)
-        try: await it.delete_original_response()
-        except: pass
+        # 3. จัดการปิดข้อความลับ (เพิ่มการ Delete เพื่อให้หายไปเอง)
+        try:
+            await it.edit_original_response(content=f"✅ แก้ไขวันสิ้นสุดเป็นวันที่ `{new_end_str}` เรียบร้อยแล้ว!", embed=None, view=None)
+            await asyncio.sleep(3)
+            await it.delete_original_response()
+        except:
+            pass
 
 class EditReasonModal(discord.ui.Modal):
     def __init__(self, idx, od, new_end):
