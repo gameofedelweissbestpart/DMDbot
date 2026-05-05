@@ -78,12 +78,19 @@ async def update_summary_board(guild):
     else:
         for tid, leaves in grouped_leaves.items():
             member = guild.get_member(int(tid))
-            display_name = member.display_name if member else leaves[0].get('name', 'ไม่พบชื่อ')
+            display_name = member.display_name if member else (leaves[0].get('name') or "ไม่ทราบชื่อ")
             desc += f" **👤 {display_name}**\n"
             for leaf in leaves:
                 dr = leaf['start_date'] if leaf['start_date'] == leaf['end_date'] else f"{leaf['start_date']} - {leaf['end_date']}"
                 desc += f" \u17b5 \u17b5 \u17b5 \u17b5 • `[{leaf.get('leave_category','ทั่วไป')}]` วันที่: {dr} `(รวม {leaf.get('total_days', 1)} วัน)`\n"
-                on_behalf = f" **(ผู้แจ้งแทน: <@{leaf['user_id']}>)**" if leaf['user_id'] != leaf['target_id'] else ""
+                
+                if leaf['user_id'] != leaf['target_id']: # ดึง Display Name ของผู้แจ้งแทน                
+                    executor = guild.get_member(int(leaf['user_id']))
+                    ex_name = executor.display_name if executor else f"<@{leaf['user_id']}>"
+                    on_behalf = f" **(ผู้แจ้งแทน: {ex_name})**" # คงรูปแบบคำพูดเดิมของคุณเป๊ะๆ
+                else:
+                    on_behalf = ""
+                    
                 desc += f" \u17b5 \u17b5 \u17b5 \u17b5 \u17b5 \u17b5 \u17b5 \u17b5 \u17b5 ⤷ **เหตุผล:** {leaf.get('reason', '-')}{on_behalf}\n"
             desc += "\n"
         
