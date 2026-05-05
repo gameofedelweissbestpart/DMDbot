@@ -77,7 +77,9 @@ async def update_summary_board(guild):
         desc += "> 🍃 **ขณะนี้ยังไม่มีสมาชิกแจ้งลาในระบบ**\n\n"
     else:
         for tid, leaves in grouped_leaves.items():
-            desc += f"👤 <@{tid}>\n"
+            member = guild.get_member(int(tid))
+            display_name = member.display_name if member else leaves[0].get('name', 'ไม่พบชื่อ')
+            desc += f" **👤 {display_name}**\n"
             for leaf in leaves:
                 dr = leaf['start_date'] if leaf['start_date'] == leaf['end_date'] else f"{leaf['start_date']} - {leaf['end_date']}"
                 desc += f" \u17b5 \u17b5 \u17b5 \u17b5 • `[{leaf.get('leave_category','ทั่วไป')}]` วันที่: {dr} `(รวม {leaf.get('total_days', 1)} วัน)`\n"
@@ -908,7 +910,7 @@ class CancelReasonModal(discord.ui.Modal):
                     
                     log_em = discord.Embed(title=log_title, color=log_color)
                     log_em.description = (
-                        f"**👤 สมาชิกที่ลา:** {tn}\n"
+                        f"**👤 สมาชิกที่ลา:** {tn}\n\n"
                         f"{executor_txt}" # แทรก Logic ผู้ดำเนินการตรงนี้ โดยคำอื่นยังอยู่ครบ
                         f"**📝 รายละเอียดรายการที่ถูกยกเลิก:**\n"
                         f" • **วันที่ลา:** {dr} `({old_data.get('total_days', 1)} วัน)`\n"
