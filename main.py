@@ -60,19 +60,30 @@ async def update_summary_board(guild):
     
     data = load_data(gid, "leaves", [])
     now = get_thai_time().date()
+    upcoming_limit = now + timedelta(days=7) # กำหนดเกณฑ์ล่วงหน้า 7 วัน
     
-    grouped_leaves = {}
+    grouped_leaves = {} # คนลาปัจจุบัน
+    upcoming_leaves = [] # คนลาล่วงหน้า
+    
     for e in data:
         try:
             start_dt = datetime.strptime(e['start_date'], "%d/%m/%Y").date()
             end_dt = datetime.strptime(e['end_date'], "%d/%m/%Y").date()
+            
+            # 1. Logic สำหรับคนลาปัจจุบัน
             if start_dt <= now <= end_dt:
                 tid = e['target_id']
                 if tid not in grouped_leaves: grouped_leaves[tid] = []
                 grouped_leaves[tid].append(e)
+            
+            # 2. Logic สำหรับคนลาล่วงหน้า (เริ่มลาหลังวันนี้แต่ไม่เกิน 7 วัน)
+            elif now < start_dt <= upcoming_limit:
+                upcoming_leaves.append(e)
         except: continue
 
     desc = f"# 📋 รายชื่อสมาชิกที่แจ้งลา (Real-time)\n{LONG_SEP}\n\n"
+    
+    # --- ส่วนที่ 1: รายชื่อคนลาปัจจุบัน (คำเดิม 100%) ---
     if not grouped_leaves:
         desc += "> 🍃 **ขณะนี้ยังไม่มีสมาชิกแจ้งลาในระบบ**\n\n"
     else:
@@ -84,17 +95,31 @@ async def update_summary_board(guild):
                 dr = leaf['start_date'] if leaf['start_date'] == leaf['end_date'] else f"{leaf['start_date']} - {leaf['end_date']}"
                 desc += f" \u17b5 \u17b5 \u17b5 \u17b5 • `[{leaf.get('leave_category','ทั่วไป')}]` วันที่: {dr} `(รวม {leaf.get('total_days', 1)} วัน)`\n"
                 
-                if leaf['user_id'] != leaf['target_id']: # ดึง Display Name ของผู้แจ้งแทน                
+                if leaf['user_id'] != leaf['target_id']:                
                     executor = guild.get_member(int(leaf['user_id']))
                     ex_name = executor.display_name if executor else f"<@{leaf['user_id']}>"
-                    on_behalf = f" **(ผู้แจ้งแทน: {ex_name})**" # คงรูปแบบคำพูดเดิมของคุณเป๊ะๆ
+                    on_behalf = f" **(ผู้แจ้งแทน: {ex_name})**" 
                 else:
                     on_behalf = ""
                     
                 desc += f" \u17b5 \u17b5 \u17b5 \u17b5 \u17b5 \u17b5 \u17b5 \u17b5 \u17b5 ⤷ **เหตุผล:** {leaf.get('reason', '-')}{on_behalf}\n"
             desc += "\n"
-        
-    desc += f"{LONG_SEP}\n**📊 สรุปจำนวนคนลาวันนี้: {len(grouped_leaves)} คน**\n"
+
+    # --- ส่วนที่ 2: รายชื่อแจ้งลาล่วงหน้า (ย้ายมาไว้ล่างเส้นคั่น) ---[cite: 4]
+    desc += f"{LONG_SEP}\n" 
+    if upcoming_leaves:
+        desc += f"**📅 __รายชื่อแจ้งลาล่วงหน้า (เร็วๆ นี้)__**\n\n"
+        upcoming_leaves.sort(key=lambda x: datetime.strptime(x['start_date'], "%d/%m/%Y")) # เรียงจากใกล้ไปไกล[cite: 4]
+        for u in upcoming_leaves:
+            u_member = guild.get_member(int(u['target_id']))
+            u_name = u_member.display_name if u_member else u.get('name', 'Unknown')
+            u_dr = u['start_date'] if u['start_date'] == u['end_date'] else f"{u['start_date']} - {u['end_date']}"
+            desc += f"👤 **{u_name}** \n \u17b5 \u17b5 \u17b5 \u17b5 \u17b5 \u17b5 \u17b5 \u17b5 \u17b5 ⤷ วันที่: {u_dr} `({u.get('leave_category','ทั่วไป')})`\n"
+        desc += "\n"
+
+    # --- ส่วนที่ 3: สรุปจำนวน (เพิ่มเส้นคั่นด้านบนตามสั่ง) ---[cite: 4]
+    desc += f"{LONG_SEP}\n" 
+    desc += f"**📊 สรุปจำนวนคนลาวันนี้: {len(grouped_leaves)} คน**\n"
     desc += f"**📅 อัปเดตล่าสุด: {get_thai_time().strftime('%d/%m/%Y %H:%M น.')}**"
     
     em = discord.Embed(description=desc, color=0x2B2D31)
