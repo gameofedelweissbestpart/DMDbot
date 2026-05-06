@@ -547,7 +547,7 @@ class AdminFinalActionView(discord.ui.View):
     @discord.ui.button(label="📝 แก้ไขข้อมูลใบลา", style=discord.ButtonStyle.secondary, custom_id="admin_edit_master_btn")
     async def edit_details(self, it: discord.Interaction, b: discord.ui.Button):
         # คงรายการประเภทการลาเดิมของคุณไว้ทั้งหมด
-        categories = ["ลาพีคไทม์", "ลาแอร์ดรอป 21:00 น.", "ลาแอร์ดรอป 00:00 น.", "ลาอีเธอร์ยักษ์", "ลาสกายฟอล", "ลาซ้อม", "ลาอื่นๆ (ระบุในเหตุผล)"]
+        categories = ["ลาพีคไทม์ (ลาทุกกิจกรรม)", "ลาแอร์ดรอป 21:00 น.", "ลาแอร์ดรอป 00:00 น.", "ลาอีเธอร์ยักษ์", "ลาสกายฟอล", "ลาซ้อม", "ลาอื่นๆ (ระบุในเหตุผล)"]
         opts = [discord.SelectOption(label=f"คงประเภทเดิม: {self.od.get('leave_category', 'ทั่วไป')}", value="KEEP_OLD", emoji="📌")]
         for cat in categories:
             opts.append(discord.SelectOption(label=cat, value=cat, emoji="📝"))
@@ -1284,7 +1284,7 @@ class DateSelect(discord.ui.Select):
 class LeaveCategorySelect(discord.ui.Select):
     def __init__(self, m_title, s_v, e_v, t_id=None, is_f=False):
         self.m_title, self.s_v, self.e_v, self.t_id, self.is_f = m_title, s_v, e_v, t_id, is_f
-        opts = [discord.SelectOption(label=x, emoji="📝") for x in ["ลาพีคไทม์", "ลาแอร์ดรอป 21:00 น.", "ลาแอร์ดรอป 00:00 น.", "ลาอีเธอร์ยักษ์", "ลาสกายฟอล", "ลาซ้อม", "ลาอื่นๆ (ระบุในเหตุผลการลา)"]]
+        opts = [discord.SelectOption(label=x, emoji="📝") for x in ["ลาพีคไทม์ (ลาทุกกิจกรรม)", "ลาแอร์ดรอป 21:00 น.", "ลาแอร์ดรอป 00:00 น.", "ลาอีเธอร์ยักษ์", "ลาสกายฟอล", "ลาซ้อม", "ลาอื่นๆ (ระบุในเหตุผล)"]]
         super().__init__(placeholder="📝 เลือกประเภทการลา...", options=opts)
     async def callback(self, it):
         await it.response.send_modal(LeaveModal(self.m_title, self.s_v, self.e_v, self.values[0], self.t_id, self.is_f))
