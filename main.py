@@ -462,29 +462,43 @@ class AdminLeaveManagementView(discord.ui.View):
         gid = str(it.guild.id)
         d = load_data(gid, "leaves", []) # โหลดข้อมูลแยกตาม Guild
         now_date = get_thai_time().date()
-        opts = []
+        # [1] กำหนดเกณฑ์ย้อนหลัง 14 วัน
+        limit_back_date = now_date - timedelta(days=14)
+        all_opts = [] # เปลี่ยนเป็นเก็บทั้งหมดก่อน
         
         for i, e in enumerate(d):
             try:
-                if datetime.strptime(e['end_date'], "%d/%m/%Y").date() < now_date: continue
+                target_end_date = datetime.strptime(e['end_date'], "%d/%m/%Y").date()
+                if target_end_date < limit_back_date: 
+                    continue
             except: continue
             
             target_m = it.guild.get_member(int(e['target_id']))
             tn = target_m.display_name if target_m else e['name']
             dr = e['start_date'] if e['start_date'] == e['end_date'] else f"{e['start_date']} - {e['end_date']}"
             
-            opts.append(discord.SelectOption(
+            all_opts.append(discord.SelectOption(
                 label=f"{tn} | {dr}",
                 description=f"โดย: {it.guild.get_member(int(e['user_id'])).display_name if it.guild.get_member(int(e['user_id'])) else 'ระบบ'}",
                 value=str(i)
             ))
             
-        if not opts: 
+        if not all_opts: 
             return await it.response.send_message("🍃 **ขณะนี้ไม่มีรายการใบลาที่กำลังดำเนินการอยู่**", ephemeral=True)
+
+        # --- ส่วนแบ่ง Dropdown ชุดละ 25 รายการ ---
+        view = SubMenuView(it) # สร้าง View เปล่า
+        # แบ่ง list all_opts ออกเป็นส่วนๆ ชุดละ 25
+        for start in range(0, len(all_opts), 25):
+            end = start + 25
+            chunk = all_opts[start:end]
+            # ใส่เลขหน้ากำกับที่ Placeholder เพื่อให้แอดมินไม่งง (รักษาคำเดิมและเพิ่มข้อมูลหน้า)
+            placeholder_text = f"🔍 เลือกใบลา (รายการที่ {start+1}-{min(end, len(all_opts))})..."
+            view.add_item(AdminActionSelect(chunk, placeholder_text))    
             
         await it.response.edit_message(
             content="🛠 **แอดมินจัดการใบลา:** เลือกรายการที่ต้องการจัดการ:", 
-            view=SubMenuView(it, AdminActionSelect(opts[:25]))
+            view=view
         )
 
     @discord.ui.button(label="🗑️ ล้างข้อมูลใบลา (30 วัน)", style=discord.ButtonStyle.primary, custom_id="admin_cleanup_trigger_v2")
@@ -500,8 +514,9 @@ class AdminLeaveManagementView(discord.ui.View):
         except: pass
 
 class AdminActionSelect(discord.ui.Select):
-    def __init__(self, opts):
-        super().__init__(placeholder="🔍 เลือกใบลาที่ต้องการจัดการ...", options=opts)
+    # ปรับปรุงให้รับ placeholder_str เพื่อรองรับการแบ่งหน้า
+    def __init__(self, opts, placeholder_str="🔍 เลือกใบลาที่ต้องการจัดการ..."):
+        super().__init__(placeholder=placeholder_str, options=opts)
     
     async def callback(self, it: discord.Interaction):
         # --- เริ่มการแก้ไข Logic แยกไฟล์ตาม Guild ---
