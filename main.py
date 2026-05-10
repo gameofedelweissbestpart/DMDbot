@@ -1588,6 +1588,27 @@ async def backup(ctx):
     except discord.Forbidden:
         await ctx.send("❌ **ไม่สามารถส่งไฟล์ได้!** โปรดเปิดการรับข้อความจาก DM (Private Message) ก่อนครับ")
 
+
+@bot.command(name="testweekly")
+@commands.is_owner() # ให้เฉพาะเจ้าของบอทใช้ได้เพื่อความปลอดภัย
+async def test_weekly(ctx):
+    await ctx.send("⌛ **กำลังทดสอบรันระบบสรุปรายสัปดาห์...**")
+    try:
+        # ดึง config มาเช็กก่อนว่าตั้ง channel ไว้หรือยัง
+        config = load_data(ctx.guild.id, 'config', {})
+        channel_id = config.get('report_channel')
+        
+        if not channel_id:
+            return await ctx.send(f"❌ **ผิดพลาด:** เซิร์ฟเวอร์นี้ยังไม่ได้ตั้งค่าห้องรับรายงาน (`report_channel` ใน config เป็นค่าว่าง)")
+
+        # เรียกใช้ฟังก์ชันส่งรายงานโดยตรง
+        await send_weekly_summary()
+        await ctx.send("✅ **รันระบบสรุปรายสัปดาห์สำเร็จ!** (โปรดเช็กในห้องรายงานที่ตั้งค่าไว้)")
+        
+    except Exception as e:
+        await ctx.send(f"⚠️ **เกิดข้อผิดพลาดขณะรัน:** `{str(e)}` \n(โปรดเช็ก Log ใน Console เพื่อดูรายละเอียด)")
+
+
 # --- ย้าย on_ready มาไว้ท้ายสุด และใส่ add_view ให้ครบ ---
 @bot.event
 async def on_ready():
